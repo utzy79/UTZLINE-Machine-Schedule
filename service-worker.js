@@ -1,0 +1,154 @@
+// UTZLINE Machine Schedule offline service worker.
+//
+// This is a brand-new, standalone app in the UTZLINE family, shipped
+// 2026-09-23. Andrew asked for it verbatim: "Manufacture status needs to
+// be split up into 2 parts. We need a machined and a manufactured tab.
+// All traceable by user name. Machined to have its own app. Called
+// machine schedule. This is where the machinist can mark off a joinery
+// item as complete. It will add their name and date time to the system."
+//
+// Confirmed follow-up decisions (same day): (1) the pipeline is
+// sequential -- "machined" must come before "manufactured", and UTZLINE
+// Manufacture ITP (updated separately) now refuses to let its own
+// checklist be signed off as "manufactured" until an item already has
+// "machined" set; (2) Manufacture ITP itself gets no new tab for this --
+// Machined is handled ENTIRELY by this standalone app; (3) this app's
+// day-to-day UI mirrors UTZLINE Scheduler's own shell/pattern (project
+// picker, sortable/filterable tables, a read-only plan viewer), simplified
+// down to this app's one job.
+//
+// It is, in fact, FORKED from UTZLINE Scheduler's own codebase (copied
+// whole, then cut down), which is why its shell -- the Projects-root
+// folder picker/reconnect flow, the pan/zoom/reset plan viewer, the
+// status-history hover popup, and the full shared name+PIN identity system
+// -- looks and behaves identically to Scheduler's own. Sits alongside
+// UTZLINE Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery
+// ITP, Projects, and Scheduler -- its own manifest, own icon (teal/cyan,
+// #0e8f8a/#3fd9d0 -- the one accent hue not already used by a sibling:
+// Site Measure/Viewer orange-red, Install ITP green, Manufacture ITP
+// purple, Delivery ITP amber, Projects crimson, Scheduler blue), own
+// taskbar/Start-menu entry, own cache namespace
+// ("utzline-machine-schedule-cache-*"). Like Install ITP/Manufacture
+// ITP/Delivery ITP/Projects/Scheduler, this is NOT built from source.html
+// -- it's its own small, purpose-built codebase.
+//
+// WHAT IT READS (the SAME Projects-root folder every other app in the
+// family uses), strictly READ-ONLY:
+//   <Project>/joinery-items.json    -- {joineryId, level, room,
+//     workOrderNo, ...} records
+//   <Project>/joinery-status.json   -- the shared, forward-only status
+//     pipeline (used here to show an item's current status and full
+//     history, exactly like every other reader app in the family)
+//   <Project>/Project Saves/Floor Plans/<Project> - <Level>.json (with a
+//     legacy per-Level-folder fallback) -- a level's floor plan image and
+//     its roomlink markers, for the read-only plan viewer
+//
+// WHAT IT WRITES -- and the ONLY thing it ever writes: this app owns NO
+// file of its own at all. Its one and only write is a forward-only status
+// transition into the SAME shared joinery-status.json every sibling app
+// already reads and writes, via the identical setJoineryStatusForward()
+// funnel every writer app in this family already uses: tapping "Mark
+// Machined complete" (a table row button, or a tap on the item's plan
+// marker) calls setJoineryStatusForward(projectHandle, level, room,
+// joineryId, "machined", deviceUserName). The forward-only guard means an
+// item already at "machined" or beyond is never touched again -- and the
+// UI itself never even offers the action once an item's already there,
+// showing who did it and when instead.
+//
+// Also, at the Projects-root level (a sibling of every project folder),
+// this app reads/writes the same shared utzline-users.csv name+PIN
+// registry every other UTZLINE app uses -- this is where Andrew's "All
+// traceable by user name" requirement is actually enforced: marking an
+// item Machined requires someone signed in first.
+//
+// THE NEW "machined" STAGE (rank 3, between "in_manufacture" and
+// "manufactured") is part of the shared rank/label/icon enum every app in
+// the family converged on the same day this app was built:
+//   ""               -> rank 0, "Created"
+//   "measured"        -> rank 1, "Check measured",    📏
+//   "in_manufacture"  -> rank 2, "In manufacture",    🏭
+//   "machined"        -> rank 3, "Machined",          ⚙️   <- what THIS app writes
+//   "manufactured"    -> rank 4, "Ready to dispatch", 📦
+//   "delivered"       -> rank 5, "Delivered",         🚚
+//   "installed"       -> rank 6, "Installed",         🏆
+//
+// Same cache-first app shell strategy as every other app in the family: a
+// small, fixed set of local files, no CDN calls once installed. Bump
+// CACHE_NAME whenever index.html or any vendored asset changes, so
+// installed copies pick up the update instead of serving stale files
+// forever.
+//
+// (v1, 2026-09-23: first release, forked from UTZLINE Scheduler's own
+// codebase. Kept from that fork: the Projects-root folder picker/
+// reconnect flow, reading joinery-items.json/joinery-status.json, the
+// Overall and per-project sortable/filterable full-width tables, the
+// read-only pan/zoom/reset plan viewer with tap-a-marker-for-an-action,
+// the status-history hover/tap popup, and the full shared name+PIN
+// identity system (with a new ["MachineSchedule","Machine Schedule"]
+// entry added to this app's own local APP_CODES list). Removed entirely:
+// Required Delivery Date, Manufacture Lead Time, Manufacture Start Date,
+// the Set Schedule/Edit schedule/Clear schedule dialog, joinery-
+// schedule.json reading/writing, computeDelayInfo and every delay-flag
+// column. Added: setJoineryStatusForward (the same shared write funnel
+// every other writer app in the family uses) and a single primary action,
+// "Mark Machined complete", available both as a table-row button and by
+// tapping an item's plan marker (opens a small confirm dialog) -- on
+// confirm, forward-only-guards a "machined" transition into
+// joinery-status.json, attributed to whoever's signed in. A Machined
+// column shows either that action or, once done, a checkmark with who did
+// it and when.)
+var ICON_VERSION = "v1";
+var CACHE_NAME = "utzline-machine-schedule-cache-v1";
+
+var PRECACHE_URLS = [
+  "./",
+  "./index.html",
+  "./manifest.json?v=" + ICON_VERSION,
+  "./icons/icon-192.png?v=" + ICON_VERSION,
+  "./icons/icon-512.png?v=" + ICON_VERSION,
+  "./icons/icon-192-maskable.png?v=" + ICON_VERSION,
+  "./icons/icon-512-maskable.png?v=" + ICON_VERSION
+];
+
+self.addEventListener("install", function(event){
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(function(cache){
+      return cache.addAll(PRECACHE_URLS);
+    }).then(function(){
+      return self.skipWaiting();
+    })
+  );
+});
+
+self.addEventListener("activate", function(event){
+  event.waitUntil(
+    caches.keys().then(function(names){
+      return Promise.all(
+        names.filter(function(n){ return n !== CACHE_NAME; })
+             .map(function(n){ return caches.delete(n); })
+      );
+    }).then(function(){
+      return self.clients.claim();
+    })
+  );
+});
+
+self.addEventListener("fetch", function(event){
+  if (event.request.method !== "GET") return;
+  event.respondWith(
+    caches.match(event.request).then(function(cached){
+      var networkFetch = fetch(event.request).then(function(response){
+        if (response && response.status === 200){
+          var copy = response.clone();
+          caches.open(CACHE_NAME).then(function(cache){ cache.put(event.request, copy); });
+        }
+        return response;
+      }).catch(function(){
+        return cached;
+      });
+      // Cache-first for instant offline loads; refresh the cache in the
+      // background whenever the network is available.
+      return cached || networkFetch;
+    })
+  );
+});

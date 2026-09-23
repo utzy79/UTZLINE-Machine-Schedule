@@ -1,0 +1,265 @@
+# UTZLINE Machine Schedule — installable app
+
+**Current version: v1** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v1 (2026-09-23):** first release. Andrew, verbatim:
+
+> "Manufacture status needs to be split up into 2 parts. We need a
+> machined and a manufactured tab. All traceable by user name. Machined
+> to have its own app. Called machine schedule. This is where the
+> machinist can mark off a joinery item as complete. It will add their
+> name and date time to the system."
+
+Confirmed follow-up decisions the same day: (1) the pipeline is
+sequential — "machined" must come before "manufactured", and UTZLINE
+Manufacture ITP (updated separately) now refuses to let its own checklist
+be signed off as "manufactured" until an item already has "machined" set;
+(2) Manufacture ITP itself gets **no** new tab for this — Machined is
+handled entirely by this standalone app; (3) this app's day-to-day UI
+mirrors UTZLINE Scheduler's own shell/pattern (project picker,
+sortable/filterable tables, a read-only plan viewer), simplified down to
+this app's one job.
+
+This folder is the self-contained, installable **UTZLINE Machine
+Schedule** app — a brand-new app in the same family as **UTZLINE Site
+Measure**, **UTZLINE Viewer**, **UTZLINE Install ITP**, **UTZLINE
+Manufacture ITP**, **UTZLINE Delivery ITP**, **UTZLINE Projects**, and
+**UTZLINE Scheduler**. It has exactly one job: let a machinist mark a
+joinery item off as **Machined**, attributed to their name and the exact
+moment they did it, in the same shared status pipeline every other
+UTZLINE app already reads.
+
+**Forked from UTZLINE Scheduler's own codebase**, not built from scratch
+— the whole directory was copied, then cut down and rebuilt around one
+action instead of Scheduler's own date-scheduling job. That's why this
+app's shell looks and behaves identically to Scheduler's own: same
+`index.html`-as-the-whole-app structure, same `manifest.json`/
+`service-worker.js` installability pattern, same Projects-root folder
+picker/reconnect flow, same read-only pan/zoom/reset plan viewer, same
+status-history hover popup, and the same shared name+PIN identity system.
+What's different: no scheduling dates, no delay flags, no file of its own
+at all — just a "Mark Machined complete" action and a Machined column.
+
+## What it reads vs. what it writes
+
+Machine Schedule reads the **same Projects folder** every other app in
+the family uses, and is **strictly read-only** against every file another
+app already owns:
+
+- `joinery-items.json` — the project's joinery item list (read-only)
+- `joinery-status.json` — the shared, forward-only status pipeline
+  (read here to show each item's current status and full history, exactly
+  like every other reader app in the family)
+- `Project Saves/Floor Plans/<Project> - <Level>.json` (with the same
+  legacy per-Level-folder fallback every ITP app and Scheduler already
+  use) — a level's floor plan image and its roomlink markers, for the
+  read-only plan viewer
+
+**The only thing this app ever writes** is a forward-only status
+transition into that same shared `joinery-status.json` — via the
+identical `setJoineryStatusForward()` funnel every writer app in this
+family already uses:
+
+```js
+setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", deviceUserName);
+```
+
+This app owns **no file of its own at all** — no
+`joinery-machine-schedule.json`, no settings file, nothing. There's
+nothing for it to remember beyond what's already in the shared pipeline.
+
+Also, at the **Projects-root level** (a sibling of every project folder,
+not inside one), this app reads/writes the same shared
+`utzline-users.csv` name+PIN registry every other UTZLINE app uses — this
+is where Andrew's **"All traceable by user name"** requirement is
+actually enforced: marking an item Machined requires someone signed in
+first (see "Shared name+PIN identity" below).
+
+## The new "machined" stage
+
+Every app in the family converged on the same target shape the same day
+this app was built — this app writes the middle rung, every other app
+just displays it:
+
+| status            | rank | label            | icon | written by |
+|-------------------|------|------------------|------|------------|
+| *(unset)*         | 0    | Created          | —    | — |
+| `measured`        | 1    | Check measured   | 📏   | Site Measure |
+| `in_manufacture`  | 2    | In manufacture   | 🏭   | Manufacture ITP |
+| `machined`        | 3    | Machined         | ⚙️   | **this app** |
+| `manufactured`    | 4    | Ready to dispatch | 📦  | Manufacture ITP (now refuses until `machined` is set) |
+| `delivered`       | 5    | Delivered        | 🚚   | Delivery ITP |
+| `installed`       | 6    | Installed        | 🏆   | Install ITP |
+
+The forward-only guard (`newRank <= curRank` → no-op) means marking an
+item Machined twice, or marking one that's already progressed further, is
+always safe — it simply doesn't move, and this app's own UI never even
+offers the action once an item's already there.
+
+## Shared name+PIN identity
+
+Ported unchanged from this app's UTZLINE Scheduler fork (itself copied
+verbatim from UTZLINE Delivery ITP's own reference implementation):
+
+- A `<select id="identitySelector">` on the Home screen **is** the button
+  — its own dropdown lists every known name plus "+ Add a new name…". No
+  separate "Set your name" button or popup.
+- Picking an existing name opens a real on-screen 4-digit numberpad to
+  verify its PIN — a wrong PIN shakes/clears the pad for another try and
+  never changes the signed-in identity; cancelling reverts the selector to
+  whoever was previously signed in.
+- Picking "+ Add a new name…" asks for the name as plain text first, then
+  chooses and confirms a 4-digit PIN via two numberpad rounds, then shows
+  a "Show me in" checklist of every UTZLINE app (pre-checked "Machine
+  Schedule" — reference only, for Andrew's own admin use; it never
+  restricts sign-in anywhere).
+- The name+PIN itself lives in `<ProjectsRoot>/utzline-users.csv`
+  (`Name,PIN,ShowInApps`, PIN in plain text on purpose — a reference-only
+  attribution registry, not a real access-control system) — the exact
+  same file every sibling UTZLINE app reads and writes. Who's currently
+  signed in on *this device* lives in the same shared `utzline-identity`
+  IndexedDB database every sibling app already uses (origin-scoped, so a
+  name set in one UTZLINE app shows up in all of them).
+- **This app is where "All traceable by user name" is enforced**: the
+  Mark Machined confirm dialog refuses to open at all until someone is
+  signed in — there'd be nothing correct to attribute the write to
+  otherwise.
+- No in-app "forgot PIN" flow, by design — resetting or clearing a PIN, or
+  freeing up a name, is a plain file-manager/spreadsheet edit to
+  `utzline-users.csv`.
+
+## What it does
+
+1. **Choose the Projects folder** (same one as every other app) — the
+   folder handle is remembered, same reconnect-after-permission-reset flow
+   the rest of the family uses.
+2. **Home** — an "Open Overall Machine Schedule" shortcut, the identity
+   selector, and the list of projects found in the folder.
+3. **Overall Machine Schedule** — every joinery item, across every
+   project, in one full-width sortable table: Project / Level / Room /
+   Joinery ID / Work order # / Status / Machined. Filterable by project,
+   status, machined-or-not, and a text search (ID or work order #).
+   Hovering (or tapping, on touch) the Status cell opens a popup listing
+   that item's full status history — every stage it's passed through,
+   when, and who changed it (same interaction as UTZLINE Projects' own
+   Joinery Register and UTZLINE Scheduler).
+4. **Project Machine Schedule** — the same table scoped to one project (no
+   Project column), plus a way to jump straight into any level's plan.
+5. **Machined column** — either a **"Mark Machined"** button (item not yet
+   machined) or, once done, a checkmark with who did it and when (e.g.
+   "✓ Andrew, Sep 23, 2026 09:40 PM") — read straight off the item's own
+   `machined` history entry. An item that reached "machined" or beyond
+   with no explicit history entry on record (a pre-existing record bumped
+   straight past this stage by some other means, before this app existed)
+   still shows a checkmark, just without a name/date to show.
+6. **Level Plan** — a read-only pan/zoom view of a level's saved floor
+   plan and its markers (the same rendering the rest of the family already
+   uses). Drag to pan; scroll-wheel or pinch to zoom; zoom in/out buttons
+   and a **Reset view** button sit in the topbar. **Tap a marker**
+   (right-click and press-and-hold/long-press also work, as alternate
+   paths) to open the **Mark as Machined?** confirm dialog for that item.
+7. **Mark as Machined? dialog** — a small, inert-until-confirmed modal:
+   "Mark `<Level>/<Room>/<Joinery ID>` as Machined?" with Confirm/Cancel.
+   On Confirm, writes the `machined` transition attributed to whoever's
+   signed in. If the item had already moved on by the time Confirm was
+   pressed (forward-only guard tripped), this says so plainly rather than
+   claiming a success that didn't happen.
+
+## Known, disclosed limitations
+
+- **Same item-matching caveat as `joinery-status.json` elsewhere in this
+  family**: two joinery items that ever collide on the exact same
+  `(level, room, joineryId)` triple are treated as one. No stable per-item
+  ID exists anywhere in this ecosystem yet to do better.
+- **Legacy, not-yet-migrated projects.** The plan viewer reads a level's
+  markers from `Project Saves/Floor Plans/<Level>.json`, falling back to
+  the older per-Level-folder shape — same dual-path loader every ITP app
+  and Scheduler already use. A project not yet touched by either fallback
+  path won't offer "View on plan" for a level until one exists, but its
+  items still appear correctly in both tables regardless.
+- **A double-tap on "Mark Machined" is a harmless no-op**, not a bug — the
+  forward-only guard means the second write never lands, so there's no
+  duplicate history entry to worry about.
+
+## Accent color
+
+Teal/cyan (`#0e8f8a` / `#3fd9d0`) — the one hue not already used by a
+sibling app (Site Measure/Viewer are orange-red, Install ITP is green,
+Manufacture ITP is purple, Delivery ITP is amber, UTZLINE Projects is
+crimson, UTZLINE Scheduler is blue).
+
+## Tests
+
+`pdftest-projects/run_machine_schedule_mark_complete.js` (Playwright
+against a fake File System Access API, same convention as the rest of the
+family): seeds a fake Projects-root folder with one project's
+`joinery-items.json` (one item) + `joinery-status.json` (that item sitting
+at `in_manufacture`), loads the app, signs in as a test identity, marks
+the item Machined via the real button click, and confirms
+`joinery-status.json` on disk now has a `machined` history entry with the
+right `by` name and a real `at` timestamp — plus that `joinery-items.json`
+is never touched, that the Machined column now shows the checkmark/name/
+date instead of the button, and that pressing Mark Machined again (or via
+the plan marker) is a safe no-op against an item already past that stage.
+
+## Getting this installed as its own app
+
+**This app lives in its own separate GitHub repository** — not a
+subfolder of any sibling app's repo. Every app in the UTZLINE family
+(Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery ITP,
+Projects, Scheduler, Machine Schedule) is its own repo with its own
+GitHub Pages URL.
+
+1. In this app's own repo, add every file from this bundle at the repo
+   root (not inside a subfolder) — keep the `icons/` folder structure
+   intact. It'll go live at that repo's own GitHub Pages URL.
+2. Open that URL once in a normal browser tab while online, so the
+   service worker can cache it for offline use.
+3. Install it: Chrome/Edge's install icon in the address bar ("Install
+   this site as an app"). Because it has its own `manifest.json` (its own
+   name and icons — teal/cyan, to tell it apart from every sibling app's
+   own colour), Chrome and Windows/Android treat it as a wholly separate,
+   independently installable app.
+4. On a phone or tablet — likely how a machinist on the shop floor will
+   actually use this — "Install this site as an app" is under the
+   browser's own menu (Chrome: menu -> "Add to Home screen" / "Install
+   app").
+
+## Updating this app
+
+Same process every time a new build ships: unzip whatever's shared in
+chat, upload the files into this app's own repo root (overwriting
+existing ones, keeping `icons/` intact), commit, wait for GitHub Pages to
+redeploy, then close and reopen the installed app to pick up the change.
+**Bump the "Current version" line at the top of this README (with a
+dated changelog entry) and `service-worker.js`'s `CACHE_NAME` every
+single time a change ships** — both need to move together, or installed
+copies keep serving a stale cached build and this README stops being a
+reliable record of what's actually live.
+
+## Things worth knowing
+
+- **This app has no data of its own to lose.** Everything it shows is
+  read fresh from `joinery-items.json`/`joinery-status.json` every time a
+  screen opens — there's no local cache to go stale or get out of sync.
+- **The name+PIN registry's PIN is plain text by design, not a real
+  security system** — see "Shared name+PIN identity" above. Don't treat
+  it as access control.
+- **Manufacture ITP enforces the sequencing, not this app.** This app
+  will let anyone signed in mark any item Machined regardless of its
+  current stage (subject only to the forward-only guard) — the "machined
+  before manufactured" rule lives in Manufacture ITP's own checklist
+  sign-off gate, not here.
+- **Same `(level, room, joineryId)` matching as everywhere else in this
+  family** — see "Known, disclosed limitations" above.
+
+## What's in this folder
+
+- `index.html` — the whole app: markup, styles, and logic in one file
+- `manifest.json`, `service-worker.js` — what makes this installable and
+  work offline
+- `icons/` — the four PWA icon sizes (`icon-192.png`, `icon-512.png`,
+  `icon-192-maskable.png`, `icon-512-maskable.png`)
+- `gen_icons.py` — the script that generated those icons (gear + checkmark
+  glyph, teal/cyan accent) — re-run it (`python3 gen_icons.py`, needs
+  Pillow) if the glyph or colors ever need to change

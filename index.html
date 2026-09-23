@@ -641,7 +641,7 @@
     </div>
   </div>
   <div class="plan-canvas-stage" id="planCanvasStageWrap">
-    <svg id="planCanvasSvg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">
+    <svg id="planCanvasSvg">
       <g id="planCanvasWorld">
         <g id="planCanvasTiles"></g>
         <g id="planCanvasMarkers"></g>
@@ -1352,16 +1352,42 @@
   });
 
   /* ============================== roomlink markers / plan viewer (read-only) ==============================
-     Rendering/hit-testing logic ported unchanged from this app's UTZLINE
-     Scheduler fork (itself copied verbatim from UTZLINE Projects' own plan
-     canvas): planApplyTransform/planFitToView/planClientToWorld/
-     planZoomAt/planRenderTiles/planRenderMarkers/planMarkerAt, the
-     pointer-based pan/pinch/tap handling, the plain-wheel-zooms wheel
-     listener, and the zoom in/out/Reset view button group. This app never
-     creates, edits, or moves a marker, it only reads and displays them --
-     tapping (or right-clicking, or long-pressing on touch) a hit opens the
-     Mark Machined confirm dialog for that item instead of Scheduler's own
-     Set Schedule dialog. */
+     Rendering/hit-testing logic ported from this app's UTZLINE Scheduler
+     fork (itself copied verbatim from UTZLINE Projects' own plan canvas):
+     planApplyTransform/planFitToView/planClientToWorld/planZoomAt/
+     planRenderTiles/planRenderMarkers/planMarkerAt, the pointer-based
+     pan/pinch/tap handling, the plain-wheel-zooms wheel listener, and the
+     zoom in/out/Reset view button group. This app never creates, edits, or
+     moves a marker, it only reads and displays them -- tapping (or
+     right-clicking, or long-pressing on touch) a hit opens the Mark
+     Machined confirm dialog for that item instead of Scheduler's own Set
+     Schedule dialog.
+
+     BUG FIX (2026-09-23, Andrew: "floor plans viewer on both schedules do
+     not work. rewrite them using the same format as the itp apps."):
+     the plan never rendered anything at all -- a completely blank dark
+     screen, no image, no markers, and a real on-screen tap on where a
+     marker visually should be never opened the Mark Machined dialog.
+     Root cause: <svg id="planCanvasSvg"> (in the markup below) carried a
+     leftover viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" --
+     inherited from UTZLINE Projects' own plan canvas -- while EVERY piece
+     of JS here (planFitToView, planClientToWorld, planZoomAt, the tile/
+     marker x/y/width/height attributes) works in raw image-pixel space and
+     assumes 1 SVG user unit === 1 CSS pixel, exactly like every ITP app's
+     own #levelPlanSvg (Delivery ITP, Install ITP), which has NO viewBox at
+     all. With the viewBox present, the browser remapped that whole
+     0-100 unit box onto the full pixel-sized viewport (a many-x scale-up
+     baked in BEFORE the JS's own translate/scale transform was applied on
+     top of it), so the image and markers ended up rendered thousands of
+     pixels wide and positioned far outside the visible viewport -- a
+     plain black screen -- and the pointer math (which reads
+     getBoundingClientRect() in real CSS pixels) no longer had any
+     correspondence to marker positions either. Fix: dropped viewBox/
+     preserveAspectRatio from the <svg> entirely, matching the ITP format
+     Andrew asked for -- the SVG's user-unit space is now plain CSS pixels,
+     exactly what every function below already assumed. Nothing else about
+     the rendering/pan/zoom/hit-testing code changed; it was already
+     correct once the SVG's own coordinate system was matched to it. */
   function roomlinkDisplayText(obj){
     return obj.joineryCode || obj.roomName || "";
   }

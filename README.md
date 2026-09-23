@@ -1,6 +1,42 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v1** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v2** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v2 (2026-09-23):** fixes the plan viewer, which shipped in v1 completely
+broken. Andrew, verbatim (reporting the same bug against both this app and
+UTZLINE Scheduler): "floor plans viewer on both schedules do not work.
+rewrite them using the same format as the itp apps."
+
+Root cause: this app's plan-canvas markup
+(`<svg id="planCanvasSvg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet">`)
+carried a leftover `viewBox` — inherited via the UTZLINE Scheduler fork
+from UTZLINE Projects' own plan canvas — while every line of this app's
+own plan-viewer JS (`planFitToView`, `planClientToWorld`, `planZoomAt`,
+the tile/marker `x`/`y`/`width`/`height` attributes) works in raw
+image-pixel space and assumes 1 SVG user unit === 1 CSS pixel, exactly
+like the ITP apps' own plan viewer (`#levelPlanSvg` in Delivery ITP and
+Install ITP), which has **no `viewBox` at all**. With the `viewBox`
+present, the browser remapped that 0–100 unit box onto the whole
+pixel-sized viewport before the JS's own translate/scale transform was
+even applied on top of it — so the floor plan image and its markers
+rendered thousands of pixels wide, positioned far outside the visible
+viewport. The result was a plain blank/black screen with nothing visible,
+and on-screen taps (which read real CSS-pixel coordinates via
+`getBoundingClientRect()`) no longer corresponded to marker positions
+either.
+
+Fix: dropped `viewBox`/`preserveAspectRatio` from `#planCanvasSvg`
+entirely, matching the ITP apps' own format exactly, as Andrew asked —
+the SVG's coordinate system is now plain CSS pixels, which is what every
+function in the plan-viewer code already assumed. Nothing else about the
+rendering/marker/pan/zoom/hit-testing logic changed; it was already
+correct, it was just being fed through a mismatched coordinate space.
+Verified with a real-browser (Playwright) test that opens the plan via
+the actual "View on plan" button (not a test hook), confirms the image
+and markers land inside the visible viewport, and performs a real
+mouse-pixel click on a marker to confirm the Mark Machined dialog still
+opens — see `run_machine_schedule_mark_complete.js` in the test suite,
+section G.
 
 **v1 (2026-09-23):** first release. Andrew, verbatim:
 

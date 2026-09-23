@@ -98,7 +98,7 @@
 // column shows either that action or, once done, a checkmark with who did
 // it and when.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v1";
+var CACHE_NAME = "utzline-machine-schedule-cache-v2";
 
 var PRECACHE_URLS = [
   "./",

@@ -1680,8 +1680,85 @@
      consistent behavior, not a bug, and is disclosed in this app's
      top-of-file comment and README. */
   function machiningFlagsFilename(){ return "machining-flags.json"; }
-  function readMachiningFlags(projectHandle){
-    if (!projectHandle) return Promise.resolve([]);
+  /* ---- machining-flags.json v2: event-sourced storage (v6, 2026-09-24) ----
+     Second round of the same rebuild already shipped for joinery-status.json
+     (see that file's own comment above readJoineryStatuses for the full
+     reasoning) -- Andrew: "we will have 30 people using this app in
+     different stages... needs to be foolproof and nevel lose data." This
+     file is owned exclusively by THIS app, but up to 5 machinists can all
+     be cutting different items in the SAME project at the same time, and
+     the old read-whole-array/change-one-record/write-whole-array-back
+     pattern had no lock -- two machinists finishing cuts within moments of
+     each other could silently lose one of their writes. Replaced with one
+     immutable event file per cut-state change, under "Project Saves/
+     Machining Flags/<key>/" (key = joineryItemPageKey, same convention as
+     joinery-status.json v2) -- current flags are always computed by
+     folding an item's own events together, per cut type independently (the
+     LATEST event for each of carcase/colourBoard/solidSurface wins, by
+     timestamp -- cuts are NOT forward-only the way overall status is; an
+     explicit revert to "pending" is a normal, supported correction, so
+     "latest wins" is exactly the semantics wanted). A cut whose latest
+     event is "pending" is omitted from the folded record entirely (same as
+     the old array's bare {state:"pending"} was functionally invisible to
+     cutStateFor's own "missing key -> pending" fallback), and an item with
+     every applicable cut back at "pending" folds to null -- the exact same
+     "no record at all" result findMachiningFlagsRecord already expects,
+     matching the old array's own "delete the whole record" behavior.
+     Reuses statusEventStamp/statusEventStampFromIso/statusEventFileName/
+     readJsonFileHandle, already defined above for joinery-status.json --
+     generic enough to serve both event streams unchanged.
+     migrateLegacyMachiningFlagsIfNeeded migrates any real, already-recorded
+     cuts from the old file automatically, once, idempotently, the first
+     time this app opens a project after this update -- the old file is
+     left on disk afterward, untouched. */
+  function machiningFlagsBranchName(){ return "Machining Flags"; }
+  function getMachiningFlagsEventsRootDir(projectHandle, create){
+    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: !!create }).then(function(psH){
+      return psH.getDirectoryHandle(machiningFlagsBranchName(), { create: !!create });
+    });
+  }
+  function getMachiningFlagsItemDir(projectHandle, key, create){
+    return getMachiningFlagsEventsRootDir(projectHandle, create).then(function(rootH){
+      return rootH.getDirectoryHandle(key, { create: !!create });
+    });
+  }
+  function listMachiningFlagsEventsForItem(projectHandle, key){
+    return getMachiningFlagsItemDir(projectHandle, key, false).then(function(dirH){
+      if (!dirH || typeof dirH.values !== "function") return [];
+      var handles = [];
+      var iter = dirH.values();
+      function step(){
+        return iter.next().then(function(res){
+          if (res.done) return handles;
+          if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) handles.push(res.value);
+          return step();
+        });
+      }
+      return step();
+    }, function(){ return []; }).then(function(handles){
+      return Promise.all(handles.map(readJsonFileHandle));
+    }).then(function(events){
+      return events.filter(function(e){ return e && typeof e === "object"; });
+    });
+  }
+  function foldMachiningFlags(events){
+    if (!events || !events.length) return null;
+    var any = events[0];
+    var rec = { level: any.level || "", room: any.room || "", joineryId: any.joineryId || "" };
+    var hasAnyNonPending = false;
+    ["carcase", "colourBoard", "solidSurface"].forEach(function(ct){
+      var evs = events.filter(function(e){ return e.cutType === ct; });
+      if (!evs.length) return;
+      var latest = null;
+      evs.forEach(function(e){ if (!latest || (e.at || "") > (latest.at || "")) latest = e; });
+      if (latest.state && latest.state !== "pending"){
+        rec[ct] = { state: latest.state, at: latest.at, by: latest.by || "" };
+        hasAnyNonPending = true;
+      }
+    });
+    return hasAnyNonPending ? rec : null;
+  }
+  function readLegacyMachiningFlagsFile(projectHandle){
     return projectHandle.getFileHandle(machiningFlagsFilename(), { create: false }).then(function(fh){
       return fh.getFile();
     }).then(function(file){
@@ -1690,11 +1767,55 @@
       try{ var arr = JSON.parse(text); return Array.isArray(arr) ? arr : []; }catch(e){ return []; }
     }, function(){ return []; });
   }
-  function writeMachiningFlags(projectHandle, list){
-    return projectHandle.getFileHandle(machiningFlagsFilename(), { create: true }).then(function(fh){
-      return fh.createWritable();
-    }).then(function(w){
-      return w.write(JSON.stringify(list)).then(function(){ return w.close(); });
+  function migrateLegacyMachiningFlagsIfNeeded(projectHandle){
+    return getMachiningFlagsEventsRootDir(projectHandle, false).then(function(){
+      return false;
+    }, function(){
+      return getMachiningFlagsEventsRootDir(projectHandle, true).then(function(){
+        return readLegacyMachiningFlagsFile(projectHandle);
+      }).then(function(list){
+        var writes = [];
+        list.forEach(function(rec){
+          if (!rec) return;
+          var key = joineryItemPageKey(rec.level, rec.room, rec.joineryId);
+          ["carcase", "colourBoard", "solidSurface"].forEach(function(ct){
+            var cut = rec[ct];
+            if (!cut || !cut.state || cut.state === "pending") return;
+            var payload = { cutType: ct, level: rec.level || "", room: rec.room || "", joineryId: rec.joineryId || "", state: cut.state, by: cut.by || "", at: cut.at || new Date(0).toISOString() };
+            var stamp = statusEventStampFromIso(payload.at);
+            writes.push(getMachiningFlagsItemDir(projectHandle, key, true).then(function(dirH){
+              return dirH.getFileHandle(statusEventFileName(payload.by, stamp, ct), { create: true });
+            }).then(function(fh){
+              return fh.createWritable();
+            }).then(function(w){
+              return w.write(JSON.stringify(payload)).then(function(){ return w.close(); });
+            }).catch(function(){}));
+          });
+        });
+        return Promise.all(writes);
+      }).then(function(){ return true; }).catch(function(){ return false; });
+    });
+  }
+  function readMachiningFlags(projectHandle){
+    if (!projectHandle) return Promise.resolve([]);
+    return migrateLegacyMachiningFlagsIfNeeded(projectHandle).then(function(){
+      return getMachiningFlagsEventsRootDir(projectHandle, false).then(function(rootH){
+        var keys = [];
+        var iter = rootH.values();
+        function step(){
+          return iter.next().then(function(res){
+            if (res.done) return keys;
+            if (res.value && res.value.kind === "directory") keys.push(res.value.name);
+            return step();
+          });
+        }
+        return step();
+      }, function(){ return null; });
+    }).then(function(keys){
+      if (keys === null) return readLegacyMachiningFlagsFile(projectHandle);
+      return Promise.all(keys.map(function(key){
+        return listMachiningFlagsEventsForItem(projectHandle, key).then(foldMachiningFlags);
+      })).then(function(list){ return list.filter(Boolean); });
     });
   }
   function findMachiningFlagsRecord(list, level, room, joineryId){
@@ -1738,34 +1859,24 @@
   // Pending) record, for the caller to refresh its own display from.
   function setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, updatedBy){
     if (!projectHandle) return Promise.resolve(null);
-    return readMachiningFlags(projectHandle).then(function(list){
-      var idx = -1;
-      for (var i = 0; i < list.length; i++){
-        var r = list[i];
-        if (r && r.level === level && (r.room || "") === (room || "") && (r.joineryId || "") === (joineryId || "")){ idx = i; break; }
+    var key = joineryItemPageKey(level, room, joineryId);
+    var payload = { cutType: cutType, level: level, room: room || "", joineryId: joineryId || "", state: newState, by: updatedBy || "", at: new Date().toISOString() };
+    var stamp = statusEventStamp(new Date(payload.at));
+    return getMachiningFlagsItemDir(projectHandle, key, true).then(function(dirH){
+      return dirH.getFileHandle(statusEventFileName(payload.by, stamp, cutType), { create: true });
+    }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(JSON.stringify(payload)).then(function(){ return w.close(); });
+    }).then(function(){
+      return listMachiningFlagsEventsForItem(projectHandle, key);
+    }).then(function(events){
+      var rec = foldMachiningFlags(events);
+      var willAutoAdvance = rec && allCutsAddressed(rec, hasSolidSurface);
+      if (willAutoAdvance){
+        return setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy).then(function(){ return rec; });
       }
-      var rec = idx >= 0 ? list[idx] : { level: level, room: room || "", joineryId: joineryId || "" };
-      if (newState === "pending"){
-        rec[cutType] = { state: "pending" };
-      } else {
-        rec[cutType] = { state: newState, at: new Date().toISOString(), by: updatedBy || "" };
-      }
-      var applicable = applicableCutTypes(hasSolidSurface);
-      var allPending = applicable.every(function(ct){ return cutStateFor(rec, ct) === "pending"; });
-      if (allPending){
-        if (idx >= 0) list.splice(idx, 1);
-      } else if (idx >= 0){
-        list[idx] = rec;
-      } else {
-        list.push(rec);
-      }
-      var willAutoAdvance = !allPending && allCutsAddressed(rec, hasSolidSurface);
-      return writeMachiningFlags(projectHandle, list).then(function(){
-        if (willAutoAdvance){
-          return setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy).then(function(){ return rec; });
-        }
-        return rec;
-      });
+      return rec;
     });
   }
   // Shared front door for every cut button (table cells AND the plan-marker

@@ -438,6 +438,12 @@
   .cut-btn:hover{ border-color: var(--accent-bright); color: var(--text); }
   .cut-btn.cut-done.active{ background: var(--ok); border-color: var(--ok); color: #06210f; }
   .cut-btn.cut-na.active{ background: var(--panel2); border-color: var(--muted2); color: var(--muted); font-style: italic; }
+  /* Cut lockout (2026-09-24): once a cut is Done/N/A it still LOOKS the
+     same at rest (the active-state colours above are unchanged) -- the
+     only visual cue that it now needs a PIN to touch again is the small
+     lock glyph on its meta line (see cutCellHtml) and this title tooltip
+     on hover/long-press. Both buttons stay fully clickable either way;
+     performCutAction is what actually gates the write behind the PIN. */
   .cut-meta{ color: var(--muted); font-size: 10px; margin-top: 3px; }
   .cut-modal-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid var(--border); }
   .cut-modal-row:first-child{ border-top:none; }
@@ -1886,15 +1892,53 @@
   // null (a no-op, already toasted/logged) if nobody's signed in or the
   // write failed; resolves the updated (possibly unpersisted) record on
   // success, same as setMachiningCutState itself.
+  // Cut lockout (2026-09-24) -- Andrew, verbatim: "once a joinery item is
+  // marked as machined, that button gets locked out on that joinery item,
+  // only changeable after that with the users pin. if its marked as
+  // machined, NA then comes locked and vice versa." Confirmed via follow-up
+  // question: the lock is per-CUT, not per-item -- the moment a single
+  // cut's own state is anything but Pending (Done OR N/A), that cut's own
+  // button pair locks, whether or not the item's OTHER cuts are still
+  // pending. The very first time a cut is recorded (Pending -> Done/N/A)
+  // needs no PIN beyond already being signed in, same as always; every
+  // change AFTER that -- reverting back to Pending, or swapping
+  // Done<->N/A ("vice versa": the lock cuts both ways, not just the
+  // revert-to-Pending direction) -- always re-confirms the signed-in
+  // person's own PIN first, via the same numberpad/verify pattern already
+  // used for Projects' "Edit joinery item" gate (openNumberpad + a
+  // verify() against that exact name's row in utzline-users.csv). Nothing
+  // is written until the PIN check resolves true; Cancel leaves the cut
+  // completely untouched.
   function performCutAction(projectHandle, level, room, joineryId, hasSolidSurface, cutType, currentState, targetState){
     if (!deviceUserName){
       showToast("Set your name first (top of the Home screen) before recording a cut.");
       return Promise.resolve(null);
     }
     var newState = currentState === targetState ? "pending" : targetState;
-    return setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, deviceUserName).catch(function(err){
-      console.error("Recording cut state failed:", err);
-      showToast("Couldn't save this — try again.");
+    var editorName = deviceUserName;
+    function writeIt(){
+      return setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, editorName).catch(function(err){
+        console.error("Recording cut state failed:", err);
+        showToast("Couldn't save this — try again.");
+        return null;
+      });
+    }
+    if (currentState === "pending") return writeIt();
+    return openNumberpad({
+      title: "Confirm PIN",
+      subtitle: "to change this cut as “" + editorName + "”",
+      verify: function(pin){
+        return readUsersCsv().then(function(rows){
+          var row = findUserRowCI(rows, editorName);
+          return !!(row && row.pin === pin);
+        });
+      }
+    }).then(function(pin){
+      if (pin === null){ showToast("Change cancelled — nothing was saved."); return null; }
+      return writeIt();
+    }).catch(function(err){
+      console.error("PIN check failed:", err);
+      showToast("Couldn't verify your PIN — try again.");
       return null;
     });
   }
@@ -2827,13 +2871,21 @@
     var state = info.state || "pending";
     var doneActive = state === "done" ? " active" : "";
     var naActive = state === "na" ? " active" : "";
+    // Locked (2026-09-24) -- once a cut is anything but Pending it needs
+    // the signed-in person's PIN to change again (see performCutAction's
+    // own comment); both buttons stay clickable (tapping either still
+    // opens the PIN prompt) but get a title tooltip and a small lock glyph
+    // on the meta line so it's clear at a glance this one isn't a free tap
+    // any more.
+    var locked = state !== "pending";
+    var lockTitle = locked ? " title=\"Locked — enter your PIN to change\"" : "";
     var meta = "";
     if (state !== "pending" && (info.by || info.at)){
-      meta = "<div class=\"cut-meta\">" + (info.by ? escapeHtml(info.by) : "") + (info.by && info.at ? ", " : "") + (info.at ? escapeHtml(formatHistoryDate(info.at)) : "") + "</div>";
+      meta = "<div class=\"cut-meta\">" + (info.by ? escapeHtml(info.by) : "") + (info.by && info.at ? ", " : "") + (info.at ? escapeHtml(formatHistoryDate(info.at)) : "") + " 🔒</div>";
     }
-    return "<div class=\"cut-group\">" +
-      "<button type=\"button\" class=\"cut-btn cut-done" + doneActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"done\">" + (state === "done" ? "✓ Done" : "Done") + "</button>" +
-      "<button type=\"button\" class=\"cut-btn cut-na" + naActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"na\">N/A</button>" +
+    return "<div class=\"cut-group" + (locked ? " cut-locked" : "") + "\">" +
+      "<button type=\"button\" class=\"cut-btn cut-done" + doneActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"done\"" + lockTitle + ">" + (state === "done" ? "✓ Done" : "Done") + "</button>" +
+      "<button type=\"button\" class=\"cut-btn cut-na" + naActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"na\"" + lockTitle + ">N/A</button>" +
       "</div>" + meta;
   }
   function scheduleRowCells(row, showProject){

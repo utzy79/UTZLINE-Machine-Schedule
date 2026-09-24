@@ -168,7 +168,7 @@
 // owned file, no new write -- purely additive to the existing read-only
 // surface.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v6";
+var CACHE_NAME = "utzline-machine-schedule-cache-v7";
 
 var PRECACHE_URLS = [
   "./",

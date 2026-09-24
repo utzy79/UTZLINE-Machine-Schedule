@@ -147,8 +147,28 @@
 // pipeline design, reverting a cut back to Pending after all three were
 // already addressed does NOT retract that "machined" status -- expected,
 // disclosed behavior, not a bug.)
+//
+// (v4, 2026-09-24: Andrew, verbatim -- "on any scheduler, there needs to be
+// a open job note button for each joinery item. between delay and view on
+// plan." Adds a read-only "Open job note" button to BOTH schedule tables'
+// row-actions cell (Overall and per-project), as the FIRST button, before
+// the existing "View on plan" one -- ported from UTZLINE Install ITP's own
+// "View job note" reference implementation. A job note is exclusively a
+// PDF (site instructions, a delivery docket, etc) attached from Site
+// Measure or the Viewer -- this app only ever reads it, same as every
+// other reader app in the family. The button only renders on a row whose
+// item actually has one (row.jobNote, read off the SAME joinery-
+// status.json record this app already reads via findJoineryStatus -- no
+// new file read for the flag itself), so there's no dead-end "no notes
+// yet" dialog on every row. Clicking it opens a shared dialog listing
+// every PDF ever attached to that exact item (newest first, sorted via
+// jobNoteSortKey so both the old prefix-timestamp and current suffix-
+// timestamp filename shapes sort correctly together), each with an "Open"
+// button (getFile() -> a short-lived object URL -> a new tab). No new
+// owned file, no new write -- purely additive to the existing read-only
+// surface.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v3";
+var CACHE_NAME = "utzline-machine-schedule-cache-v4";
 
 var PRECACHE_URLS = [
   "./",

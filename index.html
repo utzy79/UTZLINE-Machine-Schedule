@@ -370,6 +370,18 @@
   .modal-actions{ display:flex; justify-content:space-between; align-items:center; gap: 10px; margin-top: 6px; }
   .modal-actions .right{ display:flex; gap:10px; }
 
+  /* ---- "Open job note" list rows (2026-09-24) -- see the button/dialog's
+     own comment near buildEnrichedRows below. Mirrors UTZLINE Install ITP's
+     own "View job note" rows, restyled to this app's --panel/--border/
+     --muted tokens instead of ITP's surface-N ones. ---- */
+  .jobnote-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 11px; border-radius:8px; border:1px solid var(--border);
+    background:var(--panel); font-size:12.5px;
+  }
+  .jobnote-row-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .jobnote-empty{ font-size:13px; color:var(--muted); padding:2px 2px 8px; margin:0; }
+
   /* ---- shared per-device name+PIN identity (2026-09-23, see boot-time comment) ---- */
   .identity-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
   .identity-text{ font-size:12px; color:var(--muted); max-width:520px; }
@@ -742,6 +754,28 @@
       <div></div>
       <div class="right">
         <button class="btn" id="cutStatusCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- "Open job note" (2026-09-24) -- Andrew, verbatim: "on any scheduler,
+     there needs to be a open job note button for each joinery item. between
+     delay and view on plan." Read-only here, same as every other reader app
+     in the family (Install ITP, Site Measure's own popover, the Viewer) --
+     a job note is a PDF (site instructions, a delivery docket, etc) added
+     from Site Measure or the Viewer, never from here. See
+     joineryItemPageKey/getJobNotesDirForItem/listJobNotes' own comments
+     below for the exact storage shape. -->
+<div class="modal-backdrop" id="jobNoteViewBackdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="jobNoteViewTitle" style="max-width:420px;">
+    <h2 id="jobNoteViewTitle">Job notes</h2>
+    <p class="sub" id="jobNoteViewSub"></p>
+    <div id="jobNoteListEl" style="display:flex; flex-direction:column; gap:6px; max-height:280px; overflow-y:auto; margin-bottom:14px;"></div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right">
+        <button class="btn" id="jobNoteViewCancel">Close</button>
       </div>
     </div>
   </div>
@@ -1311,6 +1345,68 @@
   function statusLabelHtml(statusKey){
     var icon = joineryStatusIcon(statusKey);
     return "<span class=\"status-label\">" + (icon ? "<span class=\"status-icon\">" + icon + "</span>" : "") + escapeHtml(joineryStatusLabel(statusKey)) + "</span>";
+  }
+
+  /* ============================== job notes (read-only) ==============================
+     Andrew, verbatim (2026-09-24): "on any scheduler, there needs to be a
+     open job note button for each joinery item. between delay and view on
+     plan." A job note is exclusively a PDF (site instructions, a delivery
+     docket, etc) -- there's no text body. This app only ever READS the
+     same files every other reader app in the family reads (Install ITP,
+     Site Measure, the Viewer) -- attaching a note only ever happens from
+     Site Measure or the Viewer, never from here. Storage: one subfolder
+     per item under "Project Saves/Job Notes/<key>/", key = the same
+     joineryItemPageKey(level, room, joineryId) identity used everywhere
+     else in this family, holding every PDF ever added for that item
+     (oldest never deleted). "jobNote"/"jobNoteAt"/"jobNoteBy" on the SAME
+     joinery-status.json record this app already reads via findJoineryStatus
+     are presence/metadata flags only, written by Site Measure -- gating
+     this button's visibility on row.jobNote (see buildEnrichedRows below)
+     needs no extra file read at all. */
+  function joineryItemPageKey(levelName, roomName, joineryCode){
+    return sanitizeFileBase(levelName) + " - " + sanitizeFileBase(roomName) + (joineryCode ? " - " + sanitizeFileBase(joineryCode) : "");
+  }
+  function jobNotesBranchName(){ return "Job Notes"; }
+  function getJobNotesDirForItem(projectHandle, key){
+    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: false }).then(function(psH){
+      return psH.getDirectoryHandle(jobNotesBranchName(), { create: false });
+    }).then(function(jnH){
+      return jnH.getDirectoryHandle(key, { create: false });
+    });
+  }
+  // Pulls the "yyyy-mm-dd hh-mm-ss" stamp out of a job note filename
+  // wherever it sits -- a prefix, per the older on-disk format, or a
+  // suffix, per the current "<original name> - <stamp>.pdf" one (Andrew,
+  // 2026-09-23, didn't want the timestamp leading the filename in a file
+  // manager) -- so old and new files both keep sorting newest-first
+  // together. Mirrors UTZLINE Projects' own jobNoteSortKey exactly.
+  function jobNoteSortKey(fileName){
+    var m = /\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}/.exec(fileName || "");
+    return m ? m[0] : "";
+  }
+  // Every note for this item, newest first -- an item nobody's ever added
+  // one for simply has no folder yet, which is not an error, just an empty
+  // list.
+  function listJobNotes(projectHandle, key){
+    return getJobNotesDirForItem(projectHandle, key).then(function(dirH){
+      var out = [];
+      var iter = dirH.values();
+      function step(){
+        return iter.next().then(function(res){
+          if (res.done) return out;
+          if (res.value && res.value.kind === "file" && /\.pdf$/i.test(res.value.name)) out.push({ fileName: res.value.name, handle: res.value });
+          return step();
+        });
+      }
+      return step();
+    }, function(){ return []; }).then(function(list){
+      list.sort(function(a, b){
+        var ka = jobNoteSortKey(a.fileName), kb = jobNoteSortKey(b.fileName);
+        if (ka !== kb) return kb.localeCompare(ka);
+        return b.fileName.localeCompare(a.fileName);
+      });
+      return list;
+    });
   }
 
   /* ============================== the shared write funnel: setJoineryStatusForward ==============================
@@ -2035,6 +2131,60 @@
   cutStatusCloseBtn.addEventListener("click", closeCutStatusModal);
   cutStatusModalBackdrop.addEventListener("click", function(e){ if (e.target === cutStatusModalBackdrop) closeCutStatusModal(); });
 
+  /* ============================== "Open job note" dialog ==============================
+     See the "job notes (read-only)" comment above listJobNotes for the
+     full storage rationale. One shared dialog, opened from either
+     schedule table's per-row "Open job note" button (wireRowActions
+     above) -- lists every PDF ever attached to that exact item, newest
+     first, each with an "Open" button that opens it in a new tab via a
+     short-lived object URL (same pattern UTZLINE Install ITP's own read-
+     only "View job note" button uses). */
+  var jobNoteViewBackdrop = document.getElementById("jobNoteViewBackdrop");
+  var jobNoteViewSub = document.getElementById("jobNoteViewSub");
+  var jobNoteListEl = document.getElementById("jobNoteListEl");
+  function closeJobNoteViewDialog(){ jobNoteViewBackdrop.hidden = true; }
+  document.getElementById("jobNoteViewCancel").addEventListener("click", closeJobNoteViewDialog);
+  jobNoteViewBackdrop.addEventListener("click", function(e){ if (e.target === jobNoteViewBackdrop) closeJobNoteViewDialog(); });
+  function openJobNoteViewDialog(projectHandle, level, room, joineryId){
+    jobNoteViewSub.textContent = [level, room, joineryId].filter(Boolean).join(" — ");
+    jobNoteListEl.innerHTML = "<p class=\"jobnote-empty\">Loading…</p>";
+    jobNoteViewBackdrop.hidden = false;
+    var key = joineryItemPageKey(level, room, joineryId);
+    listJobNotes(projectHandle, key).then(function(notes){
+      jobNoteListEl.innerHTML = "";
+      if (!notes.length){
+        jobNoteListEl.innerHTML = "<p class=\"jobnote-empty\">No job notes yet for this item.</p>";
+        return;
+      }
+      notes.forEach(function(note){
+        var row = document.createElement("div");
+        row.className = "jobnote-row";
+        var nameSpan = document.createElement("span");
+        nameSpan.className = "jobnote-row-name";
+        nameSpan.textContent = note.fileName;
+        row.appendChild(nameSpan);
+        var openBtn = document.createElement("button");
+        openBtn.type = "button"; openBtn.className = "btn sm";
+        openBtn.textContent = "Open";
+        openBtn.addEventListener("click", function(){
+          note.handle.getFile().then(function(file){
+            var url = URL.createObjectURL(file);
+            window.open(url, "_blank");
+            setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+          }).catch(function(err){
+            console.error("Open job note failed:", err);
+            showToast("Couldn't open that file — try again.");
+          });
+        });
+        row.appendChild(openBtn);
+        jobNoteListEl.appendChild(row);
+      });
+    }).catch(function(err){
+      console.error("List job notes failed:", err);
+      jobNoteListEl.innerHTML = "<p class=\"jobnote-empty\">Couldn't load job notes — try again.</p>";
+    });
+  }
+
   /* ============================== generic new-name prompt (identity only) ==============================
      A small, dedicated text-entry modal -- this app has no pre-existing
      generic prompt() replacement to reuse, so this is purpose-built just
@@ -2335,7 +2485,8 @@
   /* ============================== enriched row building (shared by both tables) ============================== */
   function buildEnrichedRows(items, statusList, machiningList, projectName, projectHandle){
     return items.map(function(item){
-      var statusKey = (findJoineryStatus(statusList, item.level, item.room, item.joineryId) || {}).status || "";
+      var statusRec = findJoineryStatus(statusList, item.level, item.room, item.joineryId);
+      var statusKey = (statusRec || {}).status || "";
       var statusHistory = joineryStatusHistoryFor(statusList, item.level, item.room, item.joineryId);
       var machined = machinedInfoFor(statusList, item.level, item.room, item.joineryId);
       return {
@@ -2350,6 +2501,13 @@
         machinedDone: machined.done,
         machinedBy: machined.by,
         machinedAt: machined.at,
+        // Presence/metadata flags only -- riding along on the same
+        // joinery-status.json record above, no extra file read needed to
+        // decide whether the "Open job note" button should render at all
+        // (see scheduleRowCells below).
+        jobNote: !!(statusRec && statusRec.jobNote),
+        jobNoteAt: (statusRec && statusRec.jobNoteAt) || "",
+        jobNoteBy: (statusRec && statusRec.jobNoteBy) || "",
         hasSolidSurface: item && item.hasSolidSurface === true,
         machiningRec: findMachiningFlagsRecord(machiningList, item.level, item.room, item.joineryId),
         rawItem: item
@@ -2421,9 +2579,20 @@
       "<td class=\"cut-cell\">" + cutCellHtml(row, "carcase", true) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "colourBoard", true) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "solidSurface", row.hasSolidSurface) + "</td>" +
-      "<td class=\"row-actions\"><button type=\"button\" class=\"btn secondary sm view-plan-btn\">View on plan</button></td>";
+      "<td class=\"row-actions\">" +
+        (row.jobNote ? "<button type=\"button\" class=\"btn secondary sm job-note-btn\">Open job note</button>" : "") +
+        "<button type=\"button\" class=\"btn secondary sm view-plan-btn\">View on plan</button></td>";
   }
   function wireRowActions(tr, row, returnScreen){
+    // Only rendered at all when row.jobNote is true (see scheduleRowCells
+    // above) -- no dead-end "no notes yet" dialog on a row that never had
+    // one.
+    var jobNoteBtn = tr.querySelector(".job-note-btn");
+    if (jobNoteBtn){
+      jobNoteBtn.addEventListener("click", function(){
+        openJobNoteViewDialog(row.projectHandle, row.level, row.room, row.joineryId);
+      });
+    }
     var viewBtn = tr.querySelector(".view-plan-btn");
     viewBtn.addEventListener("click", function(){
       openPlanCanvasForLevel(row.projectHandle, row.project, row.level, returnScreen);
@@ -2830,6 +2999,9 @@
     listExistingLevels: listExistingLevels,
     readLevelFile: readLevelFile,
     openCutStatusModal: openCutStatusModal,
+    joineryItemPageKey: joineryItemPageKey,
+    listJobNotes: listJobNotes,
+    openJobNoteViewDialog: openJobNoteViewDialog,
     openPlanCanvasForLevel: openPlanCanvasForLevel,
     onPlanRightClickOrLongPress: onPlanRightClickOrLongPress,
     onPlanTap: onPlanTap,

@@ -1,6 +1,35 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v3** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v4** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v4 (2026-09-24):** adds a read-only **"Open job note"** button to both
+schedule tables. Andrew, verbatim:
+
+> "on any scheduler, there needs to be a open job note button for each
+> joinery item. between delay and view on plan."
+
+**What changed:**
+
+- A new **"Open job note"** button appears as the **first** button in the
+  row-actions cell, **before** "View on plan" — on both the Overall
+  Machine Schedule and per-project schedule tables.
+- Shown **only** on a row whose item actually has one — gated on the
+  row's own `jobNote` flag (read off the same `joinery-status.json` record
+  this app already reads via `findJoineryStatus`; no new file read for the
+  flag itself). An item with no job note gets no button and no dead-end
+  empty dialog.
+- Clicking it opens a small dialog listing every PDF ever attached to that
+  exact item (newest first), each with an "Open" button that opens it in
+  a new tab. Ported from UTZLINE Install ITP's own "View job note"
+  reference implementation (`joineryItemPageKey`/`getJobNotesDirForItem`/
+  `listJobNotes`), restyled to this app's own modal/button classes.
+- **Read-only, no new owned file, no new write.** A job note is
+  exclusively a PDF (site instructions, a delivery docket, etc.) — there
+  is no text body — attached from Site Measure or the Viewer under
+  `Project Saves/Job Notes/<key>/`, `key` = the same
+  `joineryItemPageKey(level, room, joineryId)` identity used everywhere
+  else in the family. This app only ever reads it, exactly like it already
+  reads `joinery-items.json`/`joinery-status.json`.
 
 **v3 (2026-09-23):** replaces the single "Mark Machined" action (v1/v2, see
 below — **superseded by this entry**) with three independent tri-state
@@ -330,6 +359,22 @@ as a test identity, and confirms via the real table buttons:
   hiding the Solid Surface button per item, and writes through the same
   `machining-flags.json` path as the table buttons;
 - `joinery-items.json` is never touched by any of this.
+
+`pdftest-projects/run_machine_schedule_open_job_note.js` (same fake-FS
+convention) — covers v4's "Open job note" button. Seeds a fake project
+with one item that has a real job-note PDF file already sitting in its
+`Project Saves/Job Notes/<key>/` folder plus `jobNote: true` in
+`joinery-status.json`, and one item with no job note at all, and confirms
+on **both** the Overall and per-project schedule screens:
+
+- the item with a job note shows the "Open job note" button as the FIRST
+  button in its row-actions cell, before "View on plan";
+- the item with no job note shows no such button at all — no dead-end
+  empty dialog;
+- clicking the button opens the dialog, which lists the seeded PDF by
+  name, and its "Open" button opens a real object URL without a page
+  error;
+- the plan-viewer's no-`viewBox` fix (v2) is still intact.
 
 ## Getting this installed as its own app
 

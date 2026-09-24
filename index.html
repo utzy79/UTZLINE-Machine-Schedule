@@ -37,25 +37,57 @@
   READ-ONLY against every one of these -- this app never writes into a
   file another app owns):
     <Projects root>/<Project>/
-      joinery-items.json                          <- {joineryId, description, level, room, status, workOrderNo} records
+      joinery-items.json                          <- {joineryId, description, level, room, status, workOrderNo, hasSolidSurface} records
+                                                       (hasSolidSurface added 2026-09-23 by UTZLINE Projects, this app only reads it)
       joinery-status.json                         <- the shared, forward-only status pipeline (rank/label/icon copied verbatim below)
       Project Saves/Floor Plans/<Project> - <Level>.json   <- floor plan image + `markers` (roomlink objects), for the plan viewer
 
-  DATA IT WRITES -- and the ONLY thing it ever writes: this app has no
-  file of its own at all (no "joinery-machine-schedule.json" or similar --
-  Andrew never asked for one, and there's nothing this app needs to
-  remember beyond what's already in the shared pipeline). Its one and only
-  write is a forward-only status transition into the SAME shared
+  DATA IT WRITES: this app owns exactly ONE file of its own,
+  "machining-flags.json" (see the dedicated header comment further down,
+  right above readMachiningFlags/writeMachiningFlags, for its full shape
+  and rationale) -- added 2026-09-23 for Andrew's three-cut-tracker
+  request (verbatim below). Beyond that, its one and only OTHER write is
+  the same forward-only status transition into the shared
   joinery-status.json every sibling app already reads and writes, via the
   identical setJoineryStatusForward() funnel every writer app in this
   family already uses (copied verbatim, e.g. from UTZLINE Delivery ITP's
-  own copy of it): tapping "Mark Machined complete" calls
+  own copy of it) -- except that as of 2026-09-23 this app no longer calls
+  it directly off a single button. Instead: setMachiningCutState()
+  (writes one cut's Pending/Done/N/A state into machining-flags.json,
+  attributed to whoever's signed in) checks, after every write, whether
+  EVERY currently-applicable cut for that item (Carcase + Colour board,
+  plus Solid Surface when hasSolidSurface is true) is now non-Pending
+  (Done or N/A both count as "addressed") -- and if so, calls
   setJoineryStatusForward(projectHandle, level, room, joineryId,
-  "machined", deviceUserName). The forward-only guard (newRank <= curRank
-  -> no-op) means this is always safe to press again -- an item already at
-  "machined" or beyond simply doesn't advance further, and the UI itself
-  never even offers the button once an item's already there (see the
-  Machined column below), showing its "by"/"at" attribution instead.
+  "machined", <name of whoever just completed the last cut>) exactly as
+  the old single-button flow did, keeping Manufacture ITP's existing
+  "machined" sign-off gate working unchanged. The forward-only guard
+  (newRank <= curRank -> no-op) means this is always safe -- an item
+  already at "machined" or beyond simply doesn't advance further. Andrew's
+  own request explicitly allows reverting a cut back to Pending as a
+  mistake-correction affordance; per this whole family's forward-only
+  design, reverting a cut after all three were already addressed does NOT
+  retract the "machined" status that was already written -- this is
+  expected/consistent behavior, not a bug (see machining-flags.json's own
+  header comment).
+
+  THE THREE-CUT-TRACKER FEATURE (2026-09-23) -- Andrew, verbatim: "machining
+  schedule needs a carcase cut and a colour board cut buttons. when both
+  are selected in flags machining as complete, these can also have a N/A
+  selector so if a joinery item only has colour board, we could say N.A on
+  the carcase and vice versa. ... if there is solid surface on a joinery
+  item, that needs its own cut button on the machining schedule also (only
+  visable if item has solid surface)." This replaced the single "Mark
+  Machined complete" action (the whole of v1/v2 of this app) with three
+  independent tri-state Pending/Done/N/A cut trackers -- Carcase cut and
+  Colour board cut always shown, Solid Surface cut shown only when the
+  item's own joinery-items.json record has hasSolidSurface===true -- each
+  rendered as a small [Done | N/A] button pair per cut (tapping the
+  already-active one reverts it to Pending) both inline in the Overall/
+  per-project tables and in a small panel opened by tapping an item's plan
+  marker. Every Done/N/A stamp is {state, at, by} -- both states are
+  equally "addressed" and equally attributed, per Andrew's own "All
+  traceable by user name" requirement for this whole feature.
 
   THE NEW "machined" STAGE (rank 3, between "in_manufacture" and
   "manufactured" in the shared rank/label/icon enum every app in this
@@ -118,11 +150,19 @@
     against joinery-status.json elsewhere in this family: if two items
     ever collide on that exact triple, this app treats them as one, same
     as the Joinery Register's own status lookup already does.
-  - A machinist can, in principle, tap "Mark Machined complete" twice in a
+  - A machinist can, in principle, tap a Done/N/A cut button twice in a
     row (once genuinely, once by accident before the table refreshes) --
-    the forward-only guard in setJoineryStatusForward makes the second tap
-    a harmless no-op rather than a duplicate history entry, so this is
-    disclosed as a known non-issue, not a bug.
+    tapping the already-active button is defined as "revert to Pending"
+    (the mistake-correction affordance Andrew asked for), so a genuine
+    double-tap on the SAME target state is idempotent (second tap reverts
+    it), while the underlying setJoineryStatusForward forward-only guard
+    means even a stray extra "machined" advance attempt is a harmless
+    no-op rather than a duplicate history entry.
+  - Reverting a cut back to Pending after all applicable cuts were already
+    addressed (which already advanced the shared status to "machined")
+    does NOT retract that "machined" status -- consistent with this whole
+    family's forward-only status pipeline design, disclosed here rather
+    than treated as a bug.
 
   Accent color is teal/cyan (#0e8f8a light / #3fd9d0 dark) -- the one hue
   not already used by a sibling app (Site Measure/Viewer orange-red,
@@ -142,10 +182,14 @@
   reading/writing entirely, computeDelayInfo and every delay-flag/column
   (Delay, Actual delivery, Scheduled delivery, business-day math). Machine
   Schedule doesn't own or care about scheduling dates -- that's Scheduler's
-  job, not this app's. In their place: a single primary action per item,
-  "Mark Machined complete" (a row button, and a tap on the item's plan
-  marker opens the same confirm dialog), and a Machined column showing
-  either that action or, once done, a checkmark with who did it and when.
+  job, not this app's. In their place (v1/v2): a single primary action per
+  item, "Mark Machined complete" (a row button, and a tap on the item's
+  plan marker opened the same confirm dialog), and a Machined column
+  showing either that action or, once done, a checkmark with who did it
+  and when. AS OF v3 (2026-09-23) that single action/column is itself
+  replaced by the three independent Carcase/Colour board/Solid Surface cut
+  trackers described above -- see machining-flags.json's own header
+  comment further down for the full data model.
 -->
 
 <html lang="en">
@@ -360,14 +404,33 @@
   .status-label .status-icon{ font-size: 13px; }
   .muted-cell{ color: var(--muted2); }
   .row-actions{ display: flex; gap: 6px; }
-  /* ---- Machined column: either an action button, or a done-state badge
-       showing who/when (see machinedCellHtml below). ---- */
-  .machined-done{
-    display: inline-flex; align-items: center; gap: 6px;
-    color: var(--ok); font-weight: 600; font-size: 12px;
+  /* ---- Cut trackers (Carcase / Colour board / Solid Surface): a tri-state
+       Pending/Done/N/A control per cut (see cutCellHtml below), used
+       identically in the table cells and in the plan-marker cut-status
+       panel. Pending is the plain/neutral default (neither button
+       highlighted); tapping Done or N/A highlights it (green filled
+       checkmark for Done, greyed/dashed for N/A per Andrew's own "clear at
+       a glance" ask); tapping the already-active button again reverts it
+       to Pending (the mistake-correction affordance) -- both Done and N/A
+       are equally "addressed" states and equally attributed. Added
+       2026-09-23, replacing the single .machined-done badge this column
+       used to be. ---- */
+  .cut-cell{ white-space: normal; }
+  .cut-group{ display: inline-flex; gap: 4px; }
+  .cut-btn{
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 4px 8px; font-size: 11px; font-weight: 600; cursor: pointer;
+    white-space: nowrap;
   }
-  .machined-done .who{ color: var(--text); font-weight: 700; }
-  .machined-done .when{ color: var(--muted); font-weight: 500; }
+  .cut-btn:hover{ border-color: var(--accent-bright); color: var(--text); }
+  .cut-btn.cut-done.active{ background: var(--ok); border-color: var(--ok); color: #06210f; }
+  .cut-btn.cut-na.active{ background: var(--panel2); border-color: var(--muted2); color: var(--muted); font-style: italic; }
+  .cut-meta{ color: var(--muted); font-size: 10px; margin-top: 3px; }
+  .cut-modal-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid var(--border); }
+  .cut-modal-row:first-child{ border-top:none; }
+  .cut-modal-label{ font-size: 13px; font-weight: 600; }
+  .cut-modal-body{ margin: 10px 0 4px; }
 
   /* ---- Status-history hover popup, ported verbatim (markup/classes) from
        UTZLINE Projects' own Joinery Register via this app's UTZLINE
@@ -459,7 +522,7 @@
 
 <header>
   <img src="./icons/icon-192.png" alt="">
-  <div class="brand">UTZLINE Machine Schedule<small>mark joinery as machined</small></div>
+  <div class="brand">UTZLINE Machine Schedule<small>track carcase / colour board / solid surface cuts</small></div>
 </header>
 
 <main>
@@ -467,7 +530,7 @@
   <!-- ---- Setup: no Projects root chosen yet ---- -->
   <section id="screenSetup" class="screen narrow">
     <h1>Choose your Projects folder</h1>
-    <p class="sub">Pick the same top-level Projects folder used by every other UTZLINE app (Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery ITP, Projects, Scheduler). Machine Schedule only reads their data -- the only thing it ever does is mark an item "machined" in the same shared status file they already all read. Nothing about those apps changes.</p>
+    <p class="sub">Pick the same top-level Projects folder used by every other UTZLINE app (Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery ITP, Projects, Scheduler). Machine Schedule reads their data read-only, and keeps its own machining-flags.json (Carcase/Colour board/Solid Surface cut status) alongside it -- once every applicable cut is Done or N/A, it marks the item "machined" in the same shared status file they already all read. Nothing about those apps changes.</p>
     <button class="btn" id="chooseRootBtn">Choose Projects folder</button>
     <p class="error-note" id="setupError" hidden></p>
   </section>
@@ -485,11 +548,11 @@
   <!-- ---- Home: Overall Machine Schedule + project list ---- -->
   <section id="screenHome" class="screen">
     <h1>Machine Schedule</h1>
-    <p class="sub">Mark joinery items off as Machined once they're through the machine -- attributed to your name and the moment you did it -- across every project, or one at a time.</p>
+    <p class="sub">Mark each joinery item's Carcase cut, Colour board cut, and (where it applies) Solid Surface cut as Done or N/A -- attributed to your name and the moment you did it. Once every applicable cut is addressed, the item automatically advances to Machined.</p>
     <div class="hero-card">
       <div>
         <h2>Overall Machine Schedule</h2>
-        <p>Every joinery item, across every project, in one sortable table -- who's machined what, and what's still waiting.</p>
+        <p>Every joinery item, across every project, in one sortable table -- who's cut what, and what's still waiting.</p>
       </div>
       <button class="btn" id="openOverallScheduleBtn">Open Overall Machine Schedule</button>
     </div>
@@ -504,10 +567,10 @@
          IndexedDB every sibling UTZLINE app already shares (same origin), and
          the SAME <ProjectsRoot>/utzline-users.csv registry every sibling app
          reads and writes. This is where Andrew's "All traceable by user
-         name" requirement is enforced -- marking an item Machined always
-         stamps whoever is signed in here. -->
+         name" requirement is enforced -- marking any cut Done or N/A
+         always stamps whoever is signed in here. -->
     <div class="identity-row">
-      <div class="identity-text" id="deviceUserNameText">Your name &amp; PIN: not set — you must sign in before marking any item Machined.</div>
+      <div class="identity-text" id="deviceUserNameText">Your name &amp; PIN: not set — you must sign in before marking any cut Done or N/A.</div>
       <select class="btn secondary identity-select" id="identitySelector" aria-label="Your name"></select>
     </div>
     <div class="section-title">Projects</div>
@@ -535,9 +598,9 @@
         <option value="installed">Installed</option>
       </select>
       <select id="overallMachinedFilter">
-        <option value="">Machined or not</option>
-        <option value="no">Not yet machined</option>
-        <option value="yes">Already machined</option>
+        <option value="">Fully machined or not</option>
+        <option value="no">Not yet fully machined</option>
+        <option value="yes">Fully machined</option>
       </select>
       <input type="text" id="overallSearchInput" placeholder="Search ID or work order #">
       <button class="btn secondary sm" id="refreshOverallBtn">Refresh</button>
@@ -555,7 +618,9 @@
             <th data-col="joineryId">Joinery ID</th>
             <th data-col="workOrderNo">Work order #</th>
             <th data-col="status">Status</th>
-            <th data-col="machined">Machined</th>
+            <th data-col="carcase">Carcase</th>
+            <th data-col="colourBoard">Colour board</th>
+            <th data-col="solidSurface">Solid surface</th>
             <th></th>
           </tr>
         </thead>
@@ -576,7 +641,7 @@
       <span class="section-title" style="margin:0;">Open a level's plan:</span>
       <select id="levelPlanSelect"></select>
       <button class="btn secondary sm" id="openLevelPlanBtn">Open plan</button>
-      <span class="sub" style="margin:0; font-size:12px;">Tap a marker on the plan to mark that item Machined (right-click/long-press also works).</span>
+      <span class="sub" style="margin:0; font-size:12px;">Tap a marker on the plan to record its cuts (right-click/long-press also works).</span>
     </div>
     <div class="filters-bar">
       <select id="projLevelFilter"><option value="">All levels</option></select>
@@ -591,9 +656,9 @@
         <option value="installed">Installed</option>
       </select>
       <select id="projMachinedFilter">
-        <option value="">Machined or not</option>
-        <option value="no">Not yet machined</option>
-        <option value="yes">Already machined</option>
+        <option value="">Fully machined or not</option>
+        <option value="no">Not yet fully machined</option>
+        <option value="yes">Fully machined</option>
       </select>
       <input type="text" id="projSearchInput" placeholder="Search ID or work order #">
     </div>
@@ -606,7 +671,9 @@
             <th data-col="joineryId">Joinery ID</th>
             <th data-col="workOrderNo">Work order #</th>
             <th data-col="status">Status</th>
-            <th data-col="machined">Machined</th>
+            <th data-col="carcase">Carcase</th>
+            <th data-col="colourBoard">Colour board</th>
+            <th data-col="solidSurface">Solid surface</th>
             <th></th>
           </tr>
         </thead>
@@ -648,20 +715,33 @@
       </g>
     </svg>
   </div>
-  <div class="plan-canvas-hint">Read-only plan. Tap (or right-click, or press and hold on touch) a marker to mark that item Machined. Drag to pan, scroll or pinch to zoom, or use the zoom/reset-view buttons above.</div>
+  <div class="plan-canvas-hint">Read-only plan. Tap (or right-click, or press and hold on touch) a marker to open its cut status. Drag to pan, scroll or pinch to zoom, or use the zoom/reset-view buttons above.</div>
 </section>
 
-<!-- ---- Mark Machined confirm dialog ---- -->
-<div class="modal-backdrop" id="markMachinedModalBackdrop" hidden>
-  <div class="modal" style="max-width:400px;">
-    <h2 id="markMachinedModalTitle">Mark as Machined?</h2>
-    <p class="sub" id="markMachinedModalSub"></p>
-    <p class="error-note" id="markMachinedModalError" hidden></p>
+<!-- ---- Cut status panel (plan-marker tap) ----
+     Replaces the old single "Mark as Machined?" confirm dialog (2026-09-23,
+     see the top-of-file comment and machining-flags.json's own header
+     comment for the full three-cut-tracker feature). Lists every
+     applicable cut for the tapped item (Carcase + Colour board, plus Solid
+     Surface when hasSolidSurface) as the SAME [Done | N/A] tri-state
+     button pairs the table cells use (cutCellHtml, shared) -- each tap
+     writes immediately (no separate Confirm step; there's nothing
+     destructive here that needs a confirm gate, and immediate writes match
+     the table's own behavior), the panel re-renders in place to show the
+     new state, and it stays open so a machinist can address every cut for
+     one item from a single tap on its plan marker. Closing it (Close
+     button or tapping the backdrop) refreshes whichever table screen is
+     underneath, the same as the old dialog's onDone callback did. ---- -->
+<div class="modal-backdrop" id="cutStatusModalBackdrop" hidden>
+  <div class="modal" style="max-width:420px;">
+    <h2 id="cutStatusModalTitle">Cut status</h2>
+    <p class="sub" id="cutStatusModalSub"></p>
+    <p class="error-note" id="cutStatusModalError" hidden></p>
+    <div class="cut-modal-body" id="cutStatusModalBody"></div>
     <div class="modal-actions">
       <div></div>
       <div class="right">
-        <button class="btn secondary" id="markMachinedCancelBtn">Cancel</button>
-        <button class="btn" id="markMachinedConfirmBtn">Confirm</button>
+        <button class="btn" id="cutStatusCloseBtn">Close</button>
       </div>
     </div>
   </div>
@@ -825,8 +905,8 @@
     var el = document.getElementById("deviceUserNameText");
     if (!el) return;
     el.textContent = deviceUserName
-      ? "Your name & PIN: " + deviceUserName + " — attributed on every item you mark Machined."
-      : "Your name & PIN: not set — you must sign in before marking any item Machined.";
+      ? "Your name & PIN: " + deviceUserName + " — attributed on every cut you mark Done or N/A."
+      : "Your name & PIN: not set — you must sign in before marking any cut Done or N/A.";
   }
   function loadDeviceUserName(){
     return getDeviceUserName().then(function(name){
@@ -1290,6 +1370,172 @@
     return { done: true, by: "", at: "" };
   }
 
+  /* ============================== this app's OWN machining-flags.json ==============================
+     Added 2026-09-23 for Andrew's three-cut-tracker request (verbatim,
+     also quoted in the top-of-file comment): "machining schedule needs a
+     carcase cut and a colour board cut buttons. when both are selected in
+     flags machining as complete, these can also have a N/A selector so if
+     a joinery item only has colour board, we could say N.A on the carcase
+     and vice versa. ... if there is solid surface on a joinery item, that
+     needs its own cut button on the machining schedule also (only visable
+     if item has solid surface)."
+
+     "machining-flags.json" -- a sibling of joinery-items.json/
+     joinery-status.json in each project folder, but owned EXCLUSIVELY by
+     THIS app: no other app in the family reads or writes it (mirrors
+     UTZLINE Scheduler's own "joinery-schedule.json" file-per-feature
+     convention -- read-whole-array/find-by-triple/write-whole-array --
+     right down to the shape of readJoinerySchedule/writeJoinerySchedule
+     there). One record per item that has AT LEAST ONE cut flag set (an
+     item with everything still Pending has NO record at all -- reverting
+     every applicable cut back to Pending removes the record entirely,
+     see setMachiningCutState below), matched by the exact same
+     (level, room, joineryId) triple joinery-status.json already uses:
+       {
+         "level": "...", "room": "...", "joineryId": "...",
+         "carcase":      { "state": "pending"|"done"|"na", "at": "...", "by": "..." },
+         "colourBoard":  { "state": "pending"|"done"|"na", "at": "...", "by": "..." },
+         "solidSurface": { "state": "pending"|"done"|"na", "at": "...", "by": "..." }
+       }
+     "solidSurface" is present ONLY on an item whose own joinery-items.json
+     record has hasSolidSurface===true (a field owned and written by
+     UTZLINE Projects, this app only ever reads it) -- an item without
+     solid surface never gets a "solidSurface" key at all, and its cut
+     button is never even rendered (see cutCellHtml/applicableCutTypes).
+     "at"/"by" are omitted on a cut that's still "pending" (nothing to
+     attribute yet); Done and N/A are equally "addressed" states and are
+     BOTH stamped with a real timestamp and the signed-in name, per
+     Andrew's own "All traceable by user name" requirement for this whole
+     feature -- there is no un-attributed way to set either one.
+
+     AUTO-ADVANCE TO "machined": every write through setMachiningCutState
+     re-checks, right after saving, whether EVERY currently-applicable cut
+     for that item (Carcase + Colour board, plus Solid Surface when
+     hasSolidSurface) is now non-"pending" -- and if so, calls
+     setJoineryStatusForward(projectHandle, level, room, joineryId,
+     "machined", <name of whoever just completed the last cut>), exactly
+     the same shared write funnel the old single-button v1/v2 flow used.
+     This keeps Manufacture ITP's existing "machined" sign-off gate working
+     completely unchanged -- it has no idea this app now tracks three
+     separate cuts instead of one flag.
+
+     FORWARD-ONLY, LIKE EVERYTHING ELSE IN THIS FAMILY: if a cut is later
+     reverted back to Pending after all applicable cuts were already
+     addressed (which already advanced joinery-status.json to "machined"),
+     this does NOT retract that "machined" status. The shared status
+     pipeline is forward-only by design across this whole family (see
+     setJoineryStatusForward's own comment above) -- this is expected,
+     consistent behavior, not a bug, and is disclosed in this app's
+     top-of-file comment and README. */
+  function machiningFlagsFilename(){ return "machining-flags.json"; }
+  function readMachiningFlags(projectHandle){
+    if (!projectHandle) return Promise.resolve([]);
+    return projectHandle.getFileHandle(machiningFlagsFilename(), { create: false }).then(function(fh){
+      return fh.getFile();
+    }).then(function(file){
+      return file.text();
+    }).then(function(text){
+      try{ var arr = JSON.parse(text); return Array.isArray(arr) ? arr : []; }catch(e){ return []; }
+    }, function(){ return []; });
+  }
+  function writeMachiningFlags(projectHandle, list){
+    return projectHandle.getFileHandle(machiningFlagsFilename(), { create: true }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(JSON.stringify(list)).then(function(){ return w.close(); });
+    });
+  }
+  function findMachiningFlagsRecord(list, level, room, joineryId){
+    for (var i = 0; i < list.length; i++){
+      var rec = list[i];
+      if (rec && rec.level === level && (rec.room || "") === (room || "") && (rec.joineryId || "") === (joineryId || "")) return rec;
+    }
+    return null;
+  }
+  // The three cut keys this app tracks, and which ones apply to a given
+  // item -- "solidSurface" only when hasSolidSurface is true, per Andrew's
+  // own "only visable if item has solid surface" instruction.
+  function applicableCutTypes(hasSolidSurface){
+    return hasSolidSurface ? ["carcase", "colourBoard", "solidSurface"] : ["carcase", "colourBoard"];
+  }
+  function cutStateFor(rec, cutType){
+    return (rec && rec[cutType] && rec[cutType].state) || "pending";
+  }
+  function allCutsAddressed(rec, hasSolidSurface){
+    return applicableCutTypes(hasSolidSurface).every(function(ct){ return cutStateFor(rec, ct) !== "pending"; });
+  }
+  // THE write path for a single cut. newState is "done", "na", or
+  // "pending" (a revert -- the mistake-correction affordance Andrew's
+  // request explicitly allows). Always re-reads the live file first (same
+  // never-trust-a-stale-copy discipline as readUsersCsv/
+  // setJoineryStatusForward above), then:
+  //   1) stamps the cut ({state, at, by} for done/na; bare {state:"pending"}
+  //      for a revert -- no at/by to keep once it's no longer attributed to
+  //      an action);
+  //   2) removes the WHOLE record from the array if every applicable cut is
+  //      now back to "pending" (an item with nothing set gets no row at
+  //      all, per this file's own header comment above), otherwise
+  //      upserts it;
+  //   3) writes machining-flags.json;
+  //   4) if every applicable cut is now non-"pending", forwards "machined"
+  //      into the shared joinery-status.json via setJoineryStatusForward,
+  //      attributed to updatedBy (whoever just completed this last cut) --
+  //      forward-only, so this is always safe even if the item somehow
+  //      already advanced further by some other means.
+  // Resolves with the (possibly now-unpersisted, if it reverted to fully
+  // Pending) record, for the caller to refresh its own display from.
+  function setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, updatedBy){
+    if (!projectHandle) return Promise.resolve(null);
+    return readMachiningFlags(projectHandle).then(function(list){
+      var idx = -1;
+      for (var i = 0; i < list.length; i++){
+        var r = list[i];
+        if (r && r.level === level && (r.room || "") === (room || "") && (r.joineryId || "") === (joineryId || "")){ idx = i; break; }
+      }
+      var rec = idx >= 0 ? list[idx] : { level: level, room: room || "", joineryId: joineryId || "" };
+      if (newState === "pending"){
+        rec[cutType] = { state: "pending" };
+      } else {
+        rec[cutType] = { state: newState, at: new Date().toISOString(), by: updatedBy || "" };
+      }
+      var applicable = applicableCutTypes(hasSolidSurface);
+      var allPending = applicable.every(function(ct){ return cutStateFor(rec, ct) === "pending"; });
+      if (allPending){
+        if (idx >= 0) list.splice(idx, 1);
+      } else if (idx >= 0){
+        list[idx] = rec;
+      } else {
+        list.push(rec);
+      }
+      var willAutoAdvance = !allPending && allCutsAddressed(rec, hasSolidSurface);
+      return writeMachiningFlags(projectHandle, list).then(function(){
+        if (willAutoAdvance){
+          return setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy).then(function(){ return rec; });
+        }
+        return rec;
+      });
+    });
+  }
+  // Shared front door for every cut button (table cells AND the plan-marker
+  // cut status panel both call this, so "requires sign-in" + "tapping the
+  // already-active button reverts to Pending" are enforced identically in
+  // both places, with a single implementation to keep in sync). Resolves
+  // null (a no-op, already toasted/logged) if nobody's signed in or the
+  // write failed; resolves the updated (possibly unpersisted) record on
+  // success, same as setMachiningCutState itself.
+  function performCutAction(projectHandle, level, room, joineryId, hasSolidSurface, cutType, currentState, targetState){
+    if (!deviceUserName){
+      showToast("Set your name first (top of the Home screen) before recording a cut.");
+      return Promise.resolve(null);
+    }
+    var newState = currentState === targetState ? "pending" : targetState;
+    return setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, deviceUserName).catch(function(err){
+      console.error("Recording cut state failed:", err);
+      showToast("Couldn't save this — try again.");
+      return null;
+    });
+  }
+
   /* ============================== Status-history hover popup ==============================
      Ported verbatim from UTZLINE Projects' own Joinery Register
      (joineryStatusHistoryFor/formatHistoryDate/showStatusHistoryPop/
@@ -1626,12 +1872,14 @@
       })[0] || null;
     });
   }
-  // A tap/click on a marker opens the Mark Machined confirm dialog for
-  // that item -- the same dialog right-click/long-press also open. Unlike
-  // Scheduler's own edit dialog (safe to open repeatedly, nothing to
-  // accidentally trigger), this one performs a real, if forward-only-
-  // guarded, write on Confirm -- but the dialog itself is inert until
-  // Confirm is pressed, so an accidental tap is harmless either way.
+  // A tap/click on a marker opens the cut status panel for that item --
+  // the same panel right-click/long-press also open (2026-09-23: replaced
+  // the old single "Mark as Machined?" confirm dialog -- see
+  // openCutStatusModal below). Unlike the old dialog (inert until a single
+  // Confirm press), each Done/N/A button inside the panel writes
+  // immediately, same as the table's own cut buttons -- but opening the
+  // panel itself is always harmless, so an accidental tap just shows the
+  // panel without changing anything until a button inside it is pressed.
   function onPlanTap(worldX, worldY){
     onPlanRightClickOrLongPress(worldX, worldY);
   }
@@ -1640,10 +1888,10 @@
     if (!hit){ return; }
     planFindItemForMarker(hit).then(function(item){
       if (!item){ showToast((hit.roomName || "") + (hit.joineryCode ? " · " + hit.joineryCode : "") + " — no matching item record found."); return; }
-      openMarkMachinedModal(planActiveProjectHandle, planActiveProjectName, item, function(){
+      openCutStatusModal(planActiveProjectHandle, planActiveProjectName, item, function(){
         // Re-render the plan markers isn't needed (this app draws no
-        // machined-state on the plan itself) -- but whichever table screen
-        // we came from should reflect the just-written status the moment
+        // cut-state on the plan itself) -- but whichever table screen we
+        // came from should reflect the just-written state(s) the moment
         // the visitor navigates back.
         if (planReturnScreen === "overall") loadOverallSchedule();
         else if (planReturnScreen === "projectSchedule") loadProjectSchedule(planActiveProjectHandle, planActiveProjectName);
@@ -1698,71 +1946,94 @@
     else showScreen("home");
   });
 
-  /* ============================== Mark Machined confirm dialog ==============================
-     Andrew's whole ask, in one dialog: "This is where the machinist can
-     mark off a joinery item as complete. It will add their name and date
-     time to the system." A small, inert-until-confirmed modal -- opened
-     from a table row's own "Mark Machined" button (wireRowActions below)
-     or from tapping/right-clicking/long-pressing the item's plan marker
-     (onPlanRightClickOrLongPress above). Requires someone signed in via
+  /* ============================== Cut status panel (plan marker tap) ==============================
+     Replaces the old single "Mark as Machined?" confirm dialog (2026-09-23,
+     see the top-of-file comment and machining-flags.json's own header
+     comment above for the full three-cut-tracker feature). Opened from
+     tapping/right-clicking/long-pressing an item's plan marker
+     (onPlanRightClickOrLongPress above) -- there is no equivalent "open"
+     path from a table row, since a table row already shows its own cut
+     buttons inline (cutCellHtml/wireRowActions below); this panel exists
+     purely so a machinist can address every applicable cut for one item
+     from a single tap on its plan marker. Requires someone signed in via
      the identity selector first (Andrew: "All traceable by user name") --
-     refuses to even open the confirm step without a name, since there'd
-     be nothing correct to attribute the write to. On Confirm, calls
-     setJoineryStatusForward(...,"machined", deviceUserName); the
-     forward-only guard means this is always safe, even against a stale
-     row/marker that's already moved on since the screen last loaded -- if
-     the write didn't actually land (already machined or beyond by the
-     time Confirm was pressed), this says so instead of claiming success. */
-  var markMachinedModalBackdrop = document.getElementById("markMachinedModalBackdrop");
-  var markMachinedModalTitle = document.getElementById("markMachinedModalTitle");
-  var markMachinedModalSub = document.getElementById("markMachinedModalSub");
-  var markMachinedModalError = document.getElementById("markMachinedModalError");
-  var markMachinedCancelBtn = document.getElementById("markMachinedCancelBtn");
-  var markMachinedConfirmBtn = document.getElementById("markMachinedConfirmBtn");
-  var markMachinedCtx = null; // { projectHandle, projectName, item, onDone }
+     refuses to even open without a name, since there'd be nothing correct
+     to attribute a write to. Unlike the old dialog, there is no separate
+     Confirm step: each Done/N/A button inside writes immediately (via the
+     SAME performCutAction/setMachiningCutState path the table uses,
+     defined below), the panel body re-renders in place to show the new
+     state (renderCutStatusModalBody), and the panel stays open so several
+     cuts can be addressed in one visit. Closing it (Close button, or
+     tapping the backdrop) calls onDone, which refreshes whichever table
+     screen is underneath -- same role the old dialog's onDone played. */
+  var cutStatusModalBackdrop = document.getElementById("cutStatusModalBackdrop");
+  var cutStatusModalTitle = document.getElementById("cutStatusModalTitle");
+  var cutStatusModalSub = document.getElementById("cutStatusModalSub");
+  var cutStatusModalError = document.getElementById("cutStatusModalError");
+  var cutStatusModalBody = document.getElementById("cutStatusModalBody");
+  var cutStatusCloseBtn = document.getElementById("cutStatusCloseBtn");
+  var cutStatusCtx = null; // { projectHandle, projectName, item, onDone }
 
   function itemLabel(projectName, item){
     return (projectName ? projectName + " — " : "") + item.level + " / " + item.room + (item.joineryId ? " / " + item.joineryId : "") + (item.workOrderNo ? " (WO " + item.workOrderNo + ")" : "");
   }
-  function openMarkMachinedModal(projectHandle, projectName, item, onDone){
+  var CUT_TYPE_LABELS = [["carcase", "Carcase cut"], ["colourBoard", "Colour board cut"], ["solidSurface", "Solid Surface cut"]];
+  function renderCutStatusModalBody(){
+    if (!cutStatusCtx) return Promise.resolve();
+    var ctx = cutStatusCtx;
+    var hasSolidSurface = ctx.item && ctx.item.hasSolidSurface === true;
+    return readMachiningFlags(ctx.projectHandle).then(function(list){
+      var rec = findMachiningFlagsRecord(list, ctx.item.level, ctx.item.room, ctx.item.joineryId);
+      var rowLike = { machiningRec: rec, hasSolidSurface: hasSolidSurface };
+      cutStatusModalBody.innerHTML = CUT_TYPE_LABELS.filter(function(pair){
+        return pair[0] !== "solidSurface" || hasSolidSurface;
+      }).map(function(pair){
+        return "<div class=\"cut-modal-row\"><div class=\"cut-modal-label\">" + escapeHtml(pair[1]) + "</div>" + cutCellHtml(rowLike, pair[0], hasSolidSurface) + "</div>";
+      }).join("");
+      Array.prototype.forEach.call(cutStatusModalBody.querySelectorAll(".cut-btn"), function(btn){
+        btn.addEventListener("click", function(){
+          onCutStatusModalButtonClick(btn.getAttribute("data-cut"), btn.getAttribute("data-target-state"));
+        });
+      });
+    });
+  }
+  function onCutStatusModalButtonClick(cutType, targetState){
+    if (!cutStatusCtx) return;
+    var ctx = cutStatusCtx;
+    var hasSolidSurface = ctx.item && ctx.item.hasSolidSurface === true;
+    cutStatusModalError.hidden = true;
+    readMachiningFlags(ctx.projectHandle).then(function(list){
+      var rec = findMachiningFlagsRecord(list, ctx.item.level, ctx.item.room, ctx.item.joineryId);
+      var currentState = cutStateFor(rec, cutType);
+      return performCutAction(ctx.projectHandle, ctx.item.level, ctx.item.room, ctx.item.joineryId, hasSolidSurface, cutType, currentState, targetState);
+    }).then(function(){
+      return renderCutStatusModalBody();
+    }).catch(function(err){
+      console.error("Recording cut state failed:", err);
+      cutStatusModalError.hidden = false;
+      cutStatusModalError.textContent = "Couldn't save this -- try again.";
+    });
+  }
+  function openCutStatusModal(projectHandle, projectName, item, onDone){
     if (!deviceUserName){
-      showToast("Set your name first (top of the Home screen) before marking an item Machined.");
+      showToast("Set your name first (top of the Home screen) before recording a cut.");
       return;
     }
-    markMachinedCtx = { projectHandle: projectHandle, projectName: projectName, item: item, onDone: onDone };
-    markMachinedModalTitle.textContent = "Mark as Machined?";
-    markMachinedModalSub.textContent = itemLabel(projectName, item) + " will be marked Machined as " + deviceUserName + ".";
-    markMachinedModalError.hidden = true;
-    markMachinedModalBackdrop.hidden = false;
+    cutStatusCtx = { projectHandle: projectHandle, projectName: projectName, item: item, onDone: onDone };
+    cutStatusModalTitle.textContent = "Cut status";
+    cutStatusModalSub.textContent = itemLabel(projectName, item);
+    cutStatusModalError.hidden = true;
+    cutStatusModalBackdrop.hidden = false;
+    renderCutStatusModalBody();
   }
-  function closeMarkMachinedModal(){
-    markMachinedModalBackdrop.hidden = true;
-    markMachinedCtx = null;
+  function closeCutStatusModal(){
+    cutStatusModalBackdrop.hidden = true;
+    var ctx = cutStatusCtx;
+    cutStatusCtx = null;
+    if (ctx && typeof ctx.onDone === "function") ctx.onDone();
   }
-  markMachinedCancelBtn.addEventListener("click", closeMarkMachinedModal);
-  markMachinedModalBackdrop.addEventListener("click", function(e){ if (e.target === markMachinedModalBackdrop) closeMarkMachinedModal(); });
-  markMachinedConfirmBtn.addEventListener("click", function(){
-    if (!markMachinedCtx) return;
-    var ctx = markMachinedCtx;
-    setJoineryStatusForward(ctx.projectHandle, ctx.item.level, ctx.item.room, ctx.item.joineryId, "machined", deviceUserName).then(function(resultStatus){
-      closeMarkMachinedModal();
-      if (resultStatus === "machined"){
-        showToast("Marked " + (ctx.item.joineryId || (ctx.item.level + "/" + ctx.item.room)) + " as Machined.");
-      } else {
-        // Forward-only guard tripped -- the item was already at "machined"
-        // or beyond by the time Confirm was pressed (e.g. someone else
-        // just did it, or it advanced further up the pipeline). Not an
-        // error -- just not a fresh write -- so this says so plainly
-        // rather than claiming a success that didn't happen.
-        showToast("Already at “" + joineryStatusLabel(resultStatus) + "” or beyond -- nothing changed.");
-      }
-      if (typeof ctx.onDone === "function") ctx.onDone();
-    }).catch(function(err){
-      console.error("Marking Machined failed:", err);
-      markMachinedModalError.hidden = false;
-      markMachinedModalError.textContent = "Couldn't save this -- try again.";
-    });
-  });
+  cutStatusCloseBtn.addEventListener("click", closeCutStatusModal);
+  cutStatusModalBackdrop.addEventListener("click", function(e){ if (e.target === cutStatusModalBackdrop) closeCutStatusModal(); });
 
   /* ============================== generic new-name prompt (identity only) ==============================
      A small, dedicated text-entry modal -- this app has no pre-existing
@@ -2062,7 +2333,7 @@
   }
 
   /* ============================== enriched row building (shared by both tables) ============================== */
-  function buildEnrichedRows(items, statusList, projectName, projectHandle){
+  function buildEnrichedRows(items, statusList, machiningList, projectName, projectHandle){
     return items.map(function(item){
       var statusKey = (findJoineryStatus(statusList, item.level, item.room, item.joineryId) || {}).status || "";
       var statusHistory = joineryStatusHistoryFor(statusList, item.level, item.room, item.joineryId);
@@ -2079,6 +2350,8 @@
         machinedDone: machined.done,
         machinedBy: machined.by,
         machinedAt: machined.at,
+        hasSolidSurface: item && item.hasSolidSurface === true,
+        machiningRec: findMachiningFlagsRecord(machiningList, item.level, item.room, item.joineryId),
         rawItem: item
       };
     });
@@ -2090,38 +2363,53 @@
       cmp = joineryStatusRank(a.statusKey) - joineryStatusRank(b.statusKey);
       return sort.dir === "desc" ? -cmp : cmp;
     }
-    if (col === "machined"){
-      // Not-yet-machined first when ascending (the actionable rows), then
-      // by machined date within each group -- unset dates always sort
-      // after set ones, same convention as every other date column in this
-      // family.
-      var ad = a.machinedDone ? 1 : 0, bd = b.machinedDone ? 1 : 0;
-      if (ad !== bd){ cmp = ad - bd; return sort.dir === "desc" ? -cmp : cmp; }
-      var av0 = a.machinedAt || "", bv0 = b.machinedAt || "";
-      if (!av0 && !bv0) cmp = 0;
-      else if (!av0) return 1;
-      else if (!bv0) return -1;
-      else cmp = av0 < bv0 ? -1 : (av0 > bv0 ? 1 : 0);
+    if (col === "carcase" || col === "colourBoard" || col === "solidSurface"){
+      // Pending first when ascending (the actionable rows), then by that
+      // cut's own timestamp within each group -- unset timestamps always
+      // sort after set ones, same convention the old "machined" column
+      // sort used.
+      var ar = cutStateFor(a.machiningRec, col) === "pending" ? 0 : 1;
+      var br = cutStateFor(b.machiningRec, col) === "pending" ? 0 : 1;
+      if (ar !== br){ cmp = ar - br; return sort.dir === "desc" ? -cmp : cmp; }
+      var aat = (a.machiningRec && a.machiningRec[col] && a.machiningRec[col].at) || "";
+      var bat = (b.machiningRec && b.machiningRec[col] && b.machiningRec[col].at) || "";
+      if (!aat && !bat) cmp = 0;
+      else if (!aat) return 1;
+      else if (!bat) return -1;
+      else cmp = aat < bat ? -1 : (aat > bat ? 1 : 0);
       return sort.dir === "desc" ? -cmp : cmp;
     }
     var av2 = String(a[col] || "").toLowerCase(), bv2 = String(b[col] || "").toLowerCase();
     cmp = av2 < bv2 ? -1 : (av2 > bv2 ? 1 : 0);
     return sort.dir === "desc" ? -cmp : cmp;
   }
-  // The Machined column: either a "Mark Machined" action button, or a
-  // done-state badge with who did it and when -- Andrew: "It will add
-  // their name and date time to the system." A done item with no
-  // attribution on record (see machinedInfoFor's own comment on why that
-  // can happen) still shows a checkmark, just without a name/date.
-  function machinedCellHtml(row){
-    if (!row.machinedDone){
-      return "<button type=\"button\" class=\"btn sm mark-machined-btn\">Mark Machined</button>";
+  // A single cut's tri-state Pending/Done/N/A control -- shared verbatim
+  // between the table cells (Overall + per-project) and the plan-marker
+  // cut status panel (renderCutStatusModalBody above), so both places look
+  // and behave identically. Pending (the default) renders both buttons
+  // plain/neutral -- neither highlighted, per Andrew's own "clear at a
+  // glance" ask; tapping Done or N/A highlights that one (a green filled
+  // checkmark for Done, greyed/italic "N/A" for N/A) and tapping the
+  // ALREADY-active one again is how a mistake gets corrected (reverts to
+  // Pending -- see setMachiningCutState's own comment on why this is safe
+  // and intentional). "applicable" is only meaningful for "solidSurface"
+  // (an item without hasSolidSurface never gets this button at all, shown
+  // as a plain dash instead) -- carcase/colourBoard are always applicable.
+  function cutCellHtml(rowLike, cutType, applicable){
+    if (cutType === "solidSurface" && !applicable) return "<span class=\"muted-cell\">—</span>";
+    var rec = rowLike.machiningRec;
+    var info = (rec && rec[cutType]) || {};
+    var state = info.state || "pending";
+    var doneActive = state === "done" ? " active" : "";
+    var naActive = state === "na" ? " active" : "";
+    var meta = "";
+    if (state !== "pending" && (info.by || info.at)){
+      meta = "<div class=\"cut-meta\">" + (info.by ? escapeHtml(info.by) : "") + (info.by && info.at ? ", " : "") + (info.at ? escapeHtml(formatHistoryDate(info.at)) : "") + "</div>";
     }
-    var who = row.machinedBy ? escapeHtml(row.machinedBy) : "";
-    var when = row.machinedAt ? escapeHtml(formatHistoryDate(row.machinedAt)) : "";
-    var detail = who && when ? ("<span class=\"who\">" + who + "</span>, <span class=\"when\">" + when + "</span>")
-      : (who ? "<span class=\"who\">" + who + "</span>" : (when ? "<span class=\"when\">" + when + "</span>" : ""));
-    return "<span class=\"machined-done\">✓" + (detail ? " " + detail : "") + "</span>";
+    return "<div class=\"cut-group\">" +
+      "<button type=\"button\" class=\"cut-btn cut-done" + doneActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"done\">" + (state === "done" ? "✓ Done" : "Done") + "</button>" +
+      "<button type=\"button\" class=\"cut-btn cut-na" + naActive + "\" data-cut=\"" + cutType + "\" data-target-state=\"na\">N/A</button>" +
+      "</div>" + meta;
   }
   function scheduleRowCells(row, showProject){
     return (showProject ? "<td>" + escapeHtml(row.project) + "</td>" : "") +
@@ -2130,7 +2418,9 @@
       "<td>" + escapeHtml(row.joineryId) + "</td>" +
       "<td>" + (row.workOrderNo ? escapeHtml(row.workOrderNo) : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td class=\"status-cell\">" + statusLabelHtml(row.statusKey) + "</td>" +
-      "<td class=\"machined-cell\">" + machinedCellHtml(row) + "</td>" +
+      "<td class=\"cut-cell\">" + cutCellHtml(row, "carcase", true) + "</td>" +
+      "<td class=\"cut-cell\">" + cutCellHtml(row, "colourBoard", true) + "</td>" +
+      "<td class=\"cut-cell\">" + cutCellHtml(row, "solidSurface", row.hasSolidSurface) + "</td>" +
       "<td class=\"row-actions\"><button type=\"button\" class=\"btn secondary sm view-plan-btn\">View on plan</button></td>";
   }
   function wireRowActions(tr, row, returnScreen){
@@ -2138,14 +2428,24 @@
     viewBtn.addEventListener("click", function(){
       openPlanCanvasForLevel(row.projectHandle, row.project, row.level, returnScreen);
     });
-    var markBtn = tr.querySelector(".mark-machined-btn");
-    if (markBtn){
-      markBtn.addEventListener("click", function(){
-        openMarkMachinedModal(row.projectHandle, row.project, row.rawItem, function(){
+    // Each cut's Done/N/A button pair -- same performCutAction front door
+    // the plan-marker cut status panel uses, so "requires sign-in" and
+    // "tap the active button to revert to Pending" behave identically in
+    // both places. A full reload of whichever schedule screen we're on
+    // (rather than a targeted in-place DOM patch) keeps this in lockstep
+    // with the Status column, which can itself change the moment this cut
+    // completes the last applicable one (auto-advance to "machined").
+    Array.prototype.forEach.call(tr.querySelectorAll(".cut-btn"), function(btn){
+      btn.addEventListener("click", function(){
+        var cutType = btn.getAttribute("data-cut");
+        var targetState = btn.getAttribute("data-target-state");
+        var currentState = cutStateFor(row.machiningRec, cutType);
+        performCutAction(row.projectHandle, row.level, row.room, row.joineryId, row.hasSolidSurface, cutType, currentState, targetState).then(function(result){
+          if (result === null) return; // blocked (no sign-in) or errored -- already toasted
           if (returnScreen === "overall") loadOverallSchedule(); else loadProjectSchedule(row.projectHandle, row.project);
         });
       });
-    }
+    });
     // Status-history hover/tap popup -- see showStatusHistoryPop above.
     // Hover opens/closes it on desktop; a plain click/tap toggles it,
     // since touch devices have no hover event at all -- same dual handling
@@ -2243,9 +2543,10 @@
           return projectsRootHandle.getDirectoryHandle(name, { create: false }).then(function(projectHandle){
             return Promise.all([
               readJoineryItems(projectHandle),
-              readJoineryStatuses(projectHandle)
+              readJoineryStatuses(projectHandle),
+              readMachiningFlags(projectHandle)
             ]).then(function(res){
-              var rows = buildEnrichedRows(res[0], res[1], name, projectHandle);
+              var rows = buildEnrichedRows(res[0], res[1], res[2], name, projectHandle);
               return acc.concat(rows);
             });
           }).catch(function(){ return acc; });
@@ -2336,9 +2637,10 @@
     return Promise.all([
       readJoineryItems(projectHandle),
       readJoineryStatuses(projectHandle),
-      listExistingLevels(projectHandle)
+      listExistingLevels(projectHandle),
+      readMachiningFlags(projectHandle)
     ]).then(function(res){
-      var rows = buildEnrichedRows(res[0], res[1], projectName, projectHandle);
+      var rows = buildEnrichedRows(res[0], res[1], res[3], projectName, projectHandle);
       projAllRows = rows;
       var levelNamesFromItems = Array.from(new Set(rows.map(function(r){ return r.level; }))).sort(function(a, b){ return a.localeCompare(b, undefined, { sensitivity: "base" }); });
       projLevelFilter.innerHTML = "<option value=\"\">All levels</option>" + levelNamesFromItems.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
@@ -2517,12 +2819,17 @@
     readJoineryStatuses: readJoineryStatuses,
     setJoineryStatusForward: setJoineryStatusForward,
     machinedInfoFor: machinedInfoFor,
+    readMachiningFlags: readMachiningFlags,
+    findMachiningFlagsRecord: findMachiningFlagsRecord,
+    setMachiningCutState: setMachiningCutState,
+    applicableCutTypes: applicableCutTypes,
+    cutStateFor: cutStateFor,
     buildEnrichedRows: buildEnrichedRows,
     scheduleCompare: scheduleCompare,
     listExistingProjects: listExistingProjects,
     listExistingLevels: listExistingLevels,
     readLevelFile: readLevelFile,
-    openMarkMachinedModal: openMarkMachinedModal,
+    openCutStatusModal: openCutStatusModal,
     openPlanCanvasForLevel: openPlanCanvasForLevel,
     onPlanRightClickOrLongPress: onPlanRightClickOrLongPress,
     onPlanTap: onPlanTap,

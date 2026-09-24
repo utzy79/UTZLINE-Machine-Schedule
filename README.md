@@ -1,6 +1,59 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v2** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v3** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v3 (2026-09-23):** replaces the single "Mark Machined" action (v1/v2, see
+below — **superseded by this entry**) with three independent tri-state
+cut trackers. Andrew, verbatim:
+
+> "machining schedule needs a carcase cut and a colour board cut buttons.
+> when both are selected in flags machining as complete, these can also
+> have a N/A selector so if a joinery item only has colour board, we could
+> say N.A on the carcase and vice versa. ... if there is solid surface on
+> a joinery item, that needs its own cut button on the machining schedule
+> also (only visable if item has solid surface)."
+
+**What changed:**
+
+- **Carcase cut** and **Colour board cut** — always shown, one per item,
+  each a tri-state **Pending / Done / N/A** control (a `[Done | N/A]`
+  button pair; tapping the already-active button reverts it to Pending —
+  the mistake-correction affordance). Pending is plain/neutral, Done is a
+  filled green checkmark, N/A is greyed/italic — unambiguous at a glance.
+- **Solid Surface cut** — a third, identical tri-state control, shown
+  **only** when the item's own `joinery-items.json` record has
+  `hasSolidSurface === true` (a field owned and written by UTZLINE
+  Projects; this app only ever reads it). Not shown at all for an item
+  without solid surface.
+- Marking a cut **Done or N/A** requires someone signed in (same shared
+  name+PIN identity as before) and stamps `{state, at, by}` — both states
+  are equally "addressed" and equally attributed, per Andrew's "All
+  traceable by user name" requirement for this whole feature.
+- **New owned file, `machining-flags.json`** (a sibling of
+  `joinery-items.json`/`joinery-status.json`, owned exclusively by this
+  app — see its own header comment in `index.html` for the full shape).
+  One record per item with at least one cut flag set, keyed by
+  `(level, room, joineryId)`.
+- **Auto-advance, unchanged pipeline:** once every currently-applicable
+  cut for an item is non-Pending (Done or N/A both count), this app calls
+  the exact same `setJoineryStatusForward(..., "machined", ...)` funnel
+  the old single-button flow used — Manufacture ITP's "machined" sign-off
+  gate keeps working with no changes on its end.
+- **Forward-only, consistent with the rest of this family:** reverting a
+  cut back to Pending after all three were already addressed does **not**
+  retract the "machined" status already written — expected, disclosed
+  behavior, not a bug.
+- The **Overall/per-project tables** replace the single "Machined" column
+  with three columns (**Carcase / Colour board / Solid surface** — the
+  third blank/dashed for an item without solid surface), each showing the
+  same inline tri-state control. The "Machined or not" filter is now
+  "Fully machined or not" (an item counts as fully machined once its
+  status has actually advanced to `machined`, i.e. every applicable cut
+  was addressed).
+- The **plan-marker tap** now opens a small **cut status panel** listing
+  every applicable cut for that item (instead of the old single "Mark as
+  Machined?" confirm dialog), so a machinist can address every cut for one
+  item from a single tap on its plan marker.
 
 **v2 (2026-09-23):** fixes the plan viewer, which shipped in v1 completely
 broken. Andrew, verbatim (reporting the same bug against both this app and
@@ -38,7 +91,12 @@ mouse-pixel click on a marker to confirm the Mark Machined dialog still
 opens — see `run_machine_schedule_mark_complete.js` in the test suite,
 section G.
 
-**v1 (2026-09-23):** first release. Andrew, verbatim:
+**v1 (2026-09-23):** first release. *(Historically accurate for what
+shipped in v1: a single "Mark Machined complete" action and a Machined
+column. **Superseded by v3 above**, which replaces that single action with
+three independent Carcase/Colour board/Solid Surface cut trackers — this
+entry is left intact as a record of what v1 actually shipped.)* Andrew,
+verbatim:
 
 > "Manufacture status needs to be split up into 2 parts. We need a
 > machined and a manufactured tab. All traceable by user name. Machined
@@ -60,21 +118,24 @@ This folder is the self-contained, installable **UTZLINE Machine
 Schedule** app — a brand-new app in the same family as **UTZLINE Site
 Measure**, **UTZLINE Viewer**, **UTZLINE Install ITP**, **UTZLINE
 Manufacture ITP**, **UTZLINE Delivery ITP**, **UTZLINE Projects**, and
-**UTZLINE Scheduler**. It has exactly one job: let a machinist mark a
-joinery item off as **Machined**, attributed to their name and the exact
-moment they did it, in the same shared status pipeline every other
-UTZLINE app already reads.
+**UTZLINE Scheduler**. It lets a machinist track three independent cuts
+per joinery item — **Carcase**, **Colour board**, and (where it applies)
+**Solid Surface** — each Pending/Done/N/A, attributed to their name and
+the exact moment they did it, and once every applicable cut is addressed
+it automatically advances the item to **Machined** in the same shared
+status pipeline every other UTZLINE app already reads.
 
 **Forked from UTZLINE Scheduler's own codebase**, not built from scratch
-— the whole directory was copied, then cut down and rebuilt around one
-action instead of Scheduler's own date-scheduling job. That's why this
-app's shell looks and behaves identically to Scheduler's own: same
-`index.html`-as-the-whole-app structure, same `manifest.json`/
+— the whole directory was copied, then cut down and rebuilt around
+Machine Schedule's own job instead of Scheduler's own date-scheduling job.
+That's why this app's shell looks and behaves identically to Scheduler's
+own: same `index.html`-as-the-whole-app structure, same `manifest.json`/
 `service-worker.js` installability pattern, same Projects-root folder
 picker/reconnect flow, same read-only pan/zoom/reset plan viewer, same
 status-history hover popup, and the same shared name+PIN identity system.
-What's different: no scheduling dates, no delay flags, no file of its own
-at all — just a "Mark Machined complete" action and a Machined column.
+What's different: no scheduling dates, no delay flags — just its own
+`machining-flags.json` (added in v3) tracking three tri-state cuts per
+item, auto-advancing to Machined once they're all addressed.
 
 ## What it reads vs. what it writes
 
@@ -82,7 +143,9 @@ Machine Schedule reads the **same Projects folder** every other app in
 the family uses, and is **strictly read-only** against every file another
 app already owns:
 
-- `joinery-items.json` — the project's joinery item list (read-only)
+- `joinery-items.json` — the project's joinery item list (read-only),
+  including `hasSolidSurface` (owned/written by UTZLINE Projects; this app
+  only reads it, to decide whether to show the Solid Surface cut button)
 - `joinery-status.json` — the shared, forward-only status pipeline
   (read here to show each item's current status and full history, exactly
   like every other reader app in the family)
@@ -91,24 +154,38 @@ app already owns:
   use) — a level's floor plan image and its roomlink markers, for the
   read-only plan viewer
 
-**The only thing this app ever writes** is a forward-only status
-transition into that same shared `joinery-status.json` — via the
-identical `setJoineryStatusForward()` funnel every writer app in this
-family already uses:
+**This app owns exactly one file of its own, `machining-flags.json`**
+(added in v3) — a sibling of `joinery-items.json`/`joinery-status.json` in
+each project folder, read/written EXCLUSIVELY by this app. One record per
+item with at least one cut flag set, keyed by `(level, room, joineryId)`:
 
-```js
-setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", deviceUserName);
+```json
+{ "level": "...", "room": "...", "joineryId": "...",
+  "carcase":      { "state": "pending" | "done" | "na", "at": "...", "by": "..." },
+  "colourBoard":  { "state": "pending" | "done" | "na", "at": "...", "by": "..." },
+  "solidSurface": { "state": "pending" | "done" | "na", "at": "...", "by": "..." }
+}
 ```
 
-This app owns **no file of its own at all** — no
-`joinery-machine-schedule.json`, no settings file, nothing. There's
-nothing for it to remember beyond what's already in the shared pipeline.
+`solidSurface` is present only when the item's own `hasSolidSurface` is
+`true`. An item with every applicable cut back at `"pending"` has no
+record at all.
+
+**Its one other write** is the same forward-only status transition into
+the shared `joinery-status.json` — via the identical
+`setJoineryStatusForward()` funnel every writer app in this family already
+uses — fired automatically once every currently-applicable cut for an
+item is non-`"pending"`:
+
+```js
+setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy);
+```
 
 Also, at the **Projects-root level** (a sibling of every project folder,
 not inside one), this app reads/writes the same shared
 `utzline-users.csv` name+PIN registry every other UTZLINE app uses — this
 is where Andrew's **"All traceable by user name"** requirement is
-actually enforced: marking an item Machined requires someone signed in
+actually enforced: marking any cut Done or N/A requires someone signed in
 first (see "Shared name+PIN identity" below).
 
 ## The new "machined" stage
@@ -127,10 +204,11 @@ just displays it:
 | `delivered`       | 5    | Delivered        | 🚚   | Delivery ITP |
 | `installed`       | 6    | Installed        | 🏆   | Install ITP |
 
-The forward-only guard (`newRank <= curRank` → no-op) means marking an
-item Machined twice, or marking one that's already progressed further, is
-always safe — it simply doesn't move, and this app's own UI never even
-offers the action once an item's already there.
+The forward-only guard (`newRank <= curRank` → no-op) means auto-advancing
+an item to Machined twice, or one that's already progressed further, is
+always safe — it simply doesn't move. This also means reverting a cut back
+to Pending after all three were already addressed does **not** retract an
+already-written "machined" status — expected, disclosed behavior.
 
 ## Shared name+PIN identity
 
@@ -156,9 +234,10 @@ verbatim from UTZLINE Delivery ITP's own reference implementation):
   signed in on *this device* lives in the same shared `utzline-identity`
   IndexedDB database every sibling app already uses (origin-scoped, so a
   name set in one UTZLINE app shows up in all of them).
-- **This app is where "All traceable by user name" is enforced**: the
-  Mark Machined confirm dialog refuses to open at all until someone is
-  signed in — there'd be nothing correct to attribute the write to
+- **This app is where "All traceable by user name" is enforced**: every
+  cut button (table or plan-marker panel) refuses to record Done or N/A,
+  and the plan-marker cut status panel refuses to even open, until someone
+  is signed in — there'd be nothing correct to attribute the write to
   otherwise.
 - No in-app "forgot PIN" flow, by design — resetting or clearing a PIN, or
   freeing up a name, is a plain file-manager/spreadsheet edit to
@@ -173,33 +252,34 @@ verbatim from UTZLINE Delivery ITP's own reference implementation):
    selector, and the list of projects found in the folder.
 3. **Overall Machine Schedule** — every joinery item, across every
    project, in one full-width sortable table: Project / Level / Room /
-   Joinery ID / Work order # / Status / Machined. Filterable by project,
-   status, machined-or-not, and a text search (ID or work order #).
-   Hovering (or tapping, on touch) the Status cell opens a popup listing
-   that item's full status history — every stage it's passed through,
-   when, and who changed it (same interaction as UTZLINE Projects' own
-   Joinery Register and UTZLINE Scheduler).
+   Joinery ID / Work order # / Status / **Carcase / Colour board / Solid
+   surface**. Filterable by project, status, fully-machined-or-not, and a
+   text search (ID or work order #). Hovering (or tapping, on touch) the
+   Status cell opens a popup listing that item's full status history —
+   every stage it's passed through, when, and who changed it (same
+   interaction as UTZLINE Projects' own Joinery Register and UTZLINE
+   Scheduler).
 4. **Project Machine Schedule** — the same table scoped to one project (no
    Project column), plus a way to jump straight into any level's plan.
-5. **Machined column** — either a **"Mark Machined"** button (item not yet
-   machined) or, once done, a checkmark with who did it and when (e.g.
-   "✓ Andrew, Sep 23, 2026 09:40 PM") — read straight off the item's own
-   `machined` history entry. An item that reached "machined" or beyond
-   with no explicit history entry on record (a pre-existing record bumped
-   straight past this stage by some other means, before this app existed)
-   still shows a checkmark, just without a name/date to show.
+5. **Cut columns** — Carcase and Colour board always show a `[Done | N/A]`
+   button pair; Solid surface shows the same pair only when the item's
+   `hasSolidSurface` is true, otherwise a plain dash. The active state is
+   highlighted (green checkmark for Done, greyed/italic for N/A); tapping
+   the already-active button reverts it to Pending. Once every applicable
+   cut for an item is Done or N/A, this app automatically advances its
+   shared status to Machined.
 6. **Level Plan** — a read-only pan/zoom view of a level's saved floor
    plan and its markers (the same rendering the rest of the family already
    uses). Drag to pan; scroll-wheel or pinch to zoom; zoom in/out buttons
    and a **Reset view** button sit in the topbar. **Tap a marker**
    (right-click and press-and-hold/long-press also work, as alternate
-   paths) to open the **Mark as Machined?** confirm dialog for that item.
-7. **Mark as Machined? dialog** — a small, inert-until-confirmed modal:
-   "Mark `<Level>/<Room>/<Joinery ID>` as Machined?" with Confirm/Cancel.
-   On Confirm, writes the `machined` transition attributed to whoever's
-   signed in. If the item had already moved on by the time Confirm was
-   pressed (forward-only guard tripped), this says so plainly rather than
-   claiming a success that didn't happen.
+   paths) to open the **cut status panel** for that item.
+7. **Cut status panel** — lists every applicable cut for the tapped item
+   (Carcase / Colour board, plus Solid Surface when it applies) as the
+   same `[Done | N/A]` controls the table uses; each tap writes
+   immediately and the panel updates in place, so a machinist can address
+   every cut for one item from a single tap on its plan marker. Closing
+   the panel refreshes the table underneath.
 
 ## Known, disclosed limitations
 
@@ -213,9 +293,12 @@ verbatim from UTZLINE Delivery ITP's own reference implementation):
   and Scheduler already use. A project not yet touched by either fallback
   path won't offer "View on plan" for a level until one exists, but its
   items still appear correctly in both tables regardless.
-- **A double-tap on "Mark Machined" is a harmless no-op**, not a bug — the
-  forward-only guard means the second write never lands, so there's no
-  duplicate history entry to worry about.
+- **Tapping the already-active Done/N/A button reverts that cut to
+  Pending** — this is the intended mistake-correction affordance, not a
+  bug. **Reverting a cut after all three were already addressed does not
+  retract an already-written "machined" status** — consistent with this
+  whole family's forward-only status pipeline design (see "The new
+  'machined' stage" above).
 
 ## Accent color
 
@@ -228,15 +311,25 @@ crimson, UTZLINE Scheduler is blue).
 
 `pdftest-projects/run_machine_schedule_mark_complete.js` (Playwright
 against a fake File System Access API, same convention as the rest of the
-family): seeds a fake Projects-root folder with one project's
-`joinery-items.json` (one item) + `joinery-status.json` (that item sitting
-at `in_manufacture`), loads the app, signs in as a test identity, marks
-the item Machined via the real button click, and confirms
-`joinery-status.json` on disk now has a `machined` history entry with the
-right `by` name and a real `at` timestamp — plus that `joinery-items.json`
-is never touched, that the Machined column now shows the checkmark/name/
-date instead of the button, and that pressing Mark Machined again (or via
-the plan marker) is a safe no-op against an item already past that stage.
+family) — reworked for v3's three-cut model. Seeds a fake Projects-root
+folder with a project's `joinery-items.json` (one plain item, one with
+`hasSolidSurface: true`) + `joinery-status.json`, loads the app, signs in
+as a test identity, and confirms via the real table buttons:
+
+- an item **without** solid surface shows only Carcase/Colour board
+  buttons; marking both (one Done, one N/A) writes `machining-flags.json`
+  and auto-advances `joinery-status.json` to `machined`, attributed to the
+  signed-in name;
+- an item **with** `hasSolidSurface: true` shows a third Solid Surface
+  button, and the status only auto-advances once all THREE cuts are
+  addressed, not two;
+- N/A is attributed exactly like Done (`{state:"na", at, by}`);
+- reverting a cut back to Pending after full completion does **not**
+  retract the already-written `machined` status;
+- tapping a plan marker opens the cut status panel, correctly showing/
+  hiding the Solid Surface button per item, and writes through the same
+  `machining-flags.json` path as the table buttons;
+- `joinery-items.json` is never touched by any of this.
 
 ## Getting this installed as its own app
 

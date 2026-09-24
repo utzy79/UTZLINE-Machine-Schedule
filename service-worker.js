@@ -43,17 +43,18 @@
 //     legacy per-Level-folder fallback) -- a level's floor plan image and
 //     its roomlink markers, for the read-only plan viewer
 //
-// WHAT IT WRITES -- and the ONLY thing it ever writes: this app owns NO
-// file of its own at all. Its one and only write is a forward-only status
+// WHAT IT WRITES: as of v3 (2026-09-23) this app owns exactly ONE file of
+// its own -- "machining-flags.json" (see the versioned comment block below
+// for its full shape) -- plus its one other write, a forward-only status
 // transition into the SAME shared joinery-status.json every sibling app
 // already reads and writes, via the identical setJoineryStatusForward()
-// funnel every writer app in this family already uses: tapping "Mark
-// Machined complete" (a table row button, or a tap on the item's plan
-// marker) calls setJoineryStatusForward(projectHandle, level, room,
-// joineryId, "machined", deviceUserName). The forward-only guard means an
-// item already at "machined" or beyond is never touched again -- and the
-// UI itself never even offers the action once an item's already there,
-// showing who did it and when instead.
+// funnel every writer app in this family already uses. Marking a cut
+// Done or N/A calls setMachiningCutState(), which stamps that cut into
+// machining-flags.json and, once EVERY currently-applicable cut for that
+// item is non-pending, calls setJoineryStatusForward(projectHandle, level,
+// room, joineryId, "machined", <name of whoever just completed the last
+// cut>). The forward-only guard means an item already at "machined" or
+// beyond is never pushed backward.
 //
 // Also, at the Projects-root level (a sibling of every project folder),
 // this app reads/writes the same shared utzline-users.csv name+PIN
@@ -97,8 +98,57 @@
 // joinery-status.json, attributed to whoever's signed in. A Machined
 // column shows either that action or, once done, a checkmark with who did
 // it and when.)
+//
+// (v2, 2026-09-23: fixed a leftover viewBox on #planCanvasSvg that made
+// the plan viewer render blank -- see README for the full root cause.
+// Nothing about the data model changed.)
+//
+// (v3, 2026-09-23: Andrew, verbatim -- "machining schedule needs a carcase
+// cut and a colour board cut buttons. when both are selected in flags
+// machining as complete, these can also have a N/A selector so if a
+// joinery item only has colour board, we could say N.A on the carcase and
+// vice versa. ... if there is solid surface on a joinery item, that needs
+// its own cut button on the machining schedule also (only visable if item
+// has solid surface)." Replaces the single "Mark Machined complete"
+// action/column from v1/v2 with THREE independent tri-state
+// Pending/Done/N/A cut trackers: Carcase cut and Colour board cut always
+// shown, Solid Surface cut shown only when the item's own
+// joinery-items.json record has hasSolidSurface===true (a field owned and
+// written by UTZLINE Projects, this app only reads it). Each cut is a
+// small [Done | N/A] button pair -- tapping the already-active one reverts
+// it to Pending (the mistake-correction affordance) -- shown inline in
+// both schedule tables and in a small panel opened by tapping an item's
+// plan marker (replacing the old single confirm dialog). Every Done/N/A
+// stamp is {state, at, by}, both equally attributed per Andrew's own "All
+// traceable by user name" requirement.
+//
+// NEW OWNED FILE: "machining-flags.json", a sibling of joinery-items.json/
+// joinery-status.json in each project folder, owned EXCLUSIVELY by this
+// app (mirrors UTZLINE Scheduler's own joinery-schedule.json convention).
+// One record per item with at least one cut flag set, keyed by
+// (level, room, joineryId):
+//   { "level":"...", "room":"...", "joineryId":"...",
+//     "carcase": {"state":"pending"|"done"|"na","at":"...","by":"..."},
+//     "colourBoard": {"state":"...", "at":"...", "by":"..."},
+//     "solidSurface": {"state":"...", "at":"...", "by":"..."} // only if hasSolidSurface
+//   }
+// An item with every applicable cut back at "pending" gets no record at
+// all -- see index.html's own setMachiningCutState for the exact upsert/
+// remove logic.
+//
+// AUTO-ADVANCE: every write to machining-flags.json re-checks whether
+// EVERY currently-applicable cut for that item is now non-"pending" (Done
+// or N/A both count as "addressed") and, if so, calls
+// setJoineryStatusForward(projectHandle, level, room, joineryId,
+// "machined", <name of whoever just completed the last cut>) -- the exact
+// same shared write funnel the old single-button flow used, so
+// Manufacture ITP's existing "machined" sign-off gate keeps working
+// unchanged. Consistent with this whole family's forward-only status
+// pipeline design, reverting a cut back to Pending after all three were
+// already addressed does NOT retract that "machined" status -- expected,
+// disclosed behavior, not a bug.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v2";
+var CACHE_NAME = "utzline-machine-schedule-cache-v3";
 
 var PRECACHE_URLS = [
   "./",

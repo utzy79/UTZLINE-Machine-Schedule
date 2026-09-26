@@ -167,8 +167,25 @@
 // button (getFile() -> a short-lived object URL -> a new tab). No new
 // owned file, no new write -- purely additive to the existing read-only
 // surface.)
+//
+// (v5-v8, 2026-09-24: joinery-status.json v2 and machining-flags.json v2
+// event-sourced storage, the per-cut PIN lockout, and the read-only
+// Joinery Item page -- see the README's dated entries. No cache-strategy
+// change; CACHE_NAME bumped each time.)
+//
+// (v9, 2026-09-25: family-wide scheduling sweep -- Andrew, verbatim: "ok,
+// now a full sweep of all the scheduling software". One memoised IndexedDB
+// connection per database; the device Back button walks back through the
+// app; "unreadable is not empty" applied to every read that feeds a write
+// (the name+PIN registry, both legacy migrations -- which now read the
+// legacy file BEFORE creating the events folder -- and both write funnels'
+// pre-write folds); tablet speed (per-session directory-handle cache,
+// folded-event cache, parallel project reads, instant paint from
+// last-known IndexedDB snapshots, in-place row patching after a cut tap);
+// Android touch robustness. Nothing about any on-disk format or filename
+// changes. See the README's v9 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v8";
+var CACHE_NAME = "utzline-machine-schedule-cache-v9";
 
 var PRECACHE_URLS = [
   "./",

@@ -103,10 +103,37 @@
     "delivered"       -> rank 5, "Delivered",         🚚
     "installed"       -> rank 6, "Installed",         🏆
 
-  This app has NO file of its own -- no schedule file, no settings file,
-  nothing. Beyond the shared utzline-users.csv identity registry (below),
-  its entire state is "whatever joinery-status.json already says",
-  re-read fresh every time a screen opens.
+  (v1/v2-era note, kept for the record and SUPERSEDED by the
+  machining-flags.json section below: at first this app had NO file of its
+  own -- no schedule file, no settings file, nothing -- and its entire state
+  beyond the shared utzline-users.csv identity registry was "whatever
+  joinery-status.json already says", re-read fresh every time a screen
+  opened. Since v3 it owns its own cut-state records; since v9 it also
+  keeps a device-local IndexedDB snapshot of what each screen last showed,
+  painted instantly and always refreshed from the folder behind it.)
+
+  FAMILY-WIDE SWEEP (v9, 2026-09-25) -- Andrew, verbatim: "ok, now a full
+  sweep of all the scheduling software", straight after the Site Measure
+  v46 and Install ITP v35 rounds. Applied here, same shape as Scheduler
+  v19 (this app's nearest sibling): (1) ONE memoised IndexedDB connection
+  per database (idbConnP / identityConnP) instead of a new never-closed
+  connection per call -- the family's "slows down after a little use";
+  (2) the device/phone BACK BUTTON walks back through the app (navRecord /
+  closeAnyOpenOverlay / appBackFromDeviceButton, next to showScreen);
+  (3) "UNREADABLE IS NOT EMPTY" -- every read that feeds a write or a
+  "start fresh" decision is strict (readTextFileStrict and friends): the
+  name+PIN registry, both legacy migrations (which now read the legacy
+  file BEFORE creating the events folder), and both write funnels' own
+  pre-write folds; (4) SPEED on the tablet -- per-session directory-handle
+  cache (getCachedDir), memoised migration checks, a folded-event cache
+  keyed on each item's immutable event filenames, parallel project reads,
+  instant paint from last-known snapshots, in-place row patching after a
+  cut tap instead of re-reading the schedule, joinery-items.json read once
+  per plan open, a level-name stat cache, rAF-coalesced plan transforms,
+  debounced search; (5) ANDROID robustness -- [hidden] made unconditional,
+  touch-action on controls and the table scroller, no text selection or
+  image sheet from a long press on the plan. See the README's v9 entry
+  for the full list, including the ordinary bugs found on the way.
 
   SHARED NAME+PIN IDENTITY -- ported wholesale from UTZLINE Scheduler's own
   copy of this feature (itself copied verbatim from UTZLINE Delivery ITP's
@@ -220,6 +247,14 @@
     --radius: 12px;
   }
   *{ box-sizing: border-box; }
+  /* (2026-09-25, sweep -- v9) The browser's default [hidden]{display:none}
+     is outranked by ANY author display rule, so `levelPlanRow.hidden = true`
+     on a `.card.row{display:flex}` never actually hid anything: the "Open a
+     level's plan" row showed (with an empty select) for a project with no
+     saved plan. Same bug UTZLINE Scheduler v19 found and fixed the same
+     day; confirmed here in headless Chromium (computed display stayed
+     "flex"). One rule fixes every toggle. */
+  [hidden]{ display: none !important; }
   html, body{ height: 100%; }
   body{
     margin: 0;
@@ -283,6 +318,13 @@
     cursor: pointer;
     text-decoration: none;
   }
+  /* (2026-09-25, sweep -- v9) Android: a plain tap on a button/row/header
+     must act as a plain tap -- no 300ms double-tap-zoom wait, no text
+     selection from a slightly-long press. `manipulation` keeps pan/pinch on
+     the page but drops double-tap zoom on these controls. The cut buttons
+     get it too -- a machinist taps those more than anything else here. */
+  .btn, .list-item, .sched-table th, .cut-btn, select, input{ touch-action: manipulation; }
+  .btn, .list-item, .sched-table th, .cut-btn{ -webkit-user-select: none; user-select: none; }
   .btn:hover{ filter: brightness(1.1); }
   .btn.secondary{
     background: transparent;
@@ -436,9 +478,23 @@
     color: var(--text); padding: 8px 10px; font-size: 13px;
   }
   .filters-bar input[type=text]{ min-width: 180px; flex: 1 1 180px; }
+  /* Filter tick boxes (2026-09-26, v9 addendum) -- Andrew: "add in tick
+     boxes for filtering out installed and delivered items. Also machining
+     filter out machined with a tickbox". Sit in the same bar as the
+     selects/search; the count line under the bar follows the filter. */
+  .tick{ display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+  .tick input{ width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .count-line{ font-size: 12px; color: var(--muted); margin: 0 0 10px; }
 
   /* schedule tables */
-  .table-scroll{ overflow-x: auto; }
+  /* (2026-09-25, sweep -- v9) A wide table on a tablet pans with a finger in
+     both axes; tapping a row's button must not fight the pan -- `pan-x
+     pan-y` tells the browser the scroll is its job and the tap is ours. */
+  .table-scroll{ overflow-x: auto; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+  /* Instant-paint refresh note (2026-09-25, sweep -- v9): shown while a
+     table painted from its last-known device-local snapshot is being
+     refreshed from the folder in the background. */
+  .refresh-note{ font-size: 12px; color: var(--muted2); margin: 0 0 10px; }
   .sched-table{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
   .sched-table th{
     text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 600;
@@ -476,6 +532,11 @@
     white-space: nowrap;
   }
   .cut-btn:hover{ border-color: var(--accent-bright); color: var(--text); }
+  /* (2026-09-25, sweep -- v9) Both buttons of a cut are disabled while that
+     cut's write is in flight, so a double tap on a slow tablet can't file
+     two events (the second of which would have been read as a REVERT of
+     the first once the row caught up). */
+  .cut-btn:disabled{ opacity: .55; cursor: default; }
   .cut-btn.cut-done.active{ background: var(--ok); border-color: var(--ok); color: #06210f; }
   .cut-btn.cut-na.active{ background: var(--panel2); border-color: var(--muted2); color: var(--muted); font-style: italic; }
   /* Cut lockout (2026-09-24): once a cut is Done/N/A it still LOOKS the
@@ -519,6 +580,11 @@
     width: auto; max-width: none;
     display: flex; flex-direction: column;
     background: #070d10;
+    /* (2026-09-25, sweep -- v9) Android: a long press on the plan (this
+       app's own long-press-to-open-cut-status gesture) must never select
+       the title text or pop the image "save/copy" sheet -- paired with the
+       document-level contextmenu swallow while this screen is open. */
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
   .plan-canvas-screen[hidden]{ display: none; }
   .plan-canvas-topbar{
@@ -588,7 +654,7 @@
   <!-- ---- Setup: no Projects root chosen yet ---- -->
   <section id="screenSetup" class="screen narrow">
     <h1>Choose your Projects folder</h1>
-    <p class="sub">Pick the same top-level Projects folder used by every other UTZLINE app (Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery ITP, Projects, Scheduler). Machine Schedule reads their data read-only, and keeps its own machining-flags.json (Carcase/Colour board/Solid Surface cut status) alongside it -- once every applicable cut is Done or N/A, it marks the item "machined" in the same shared status file they already all read. Nothing about those apps changes.</p>
+    <p class="sub">Pick the same top-level Projects folder used by every other UTZLINE app (Site Measure, Viewer, Install ITP, Manufacture ITP, Delivery ITP, Projects, Scheduler). Machine Schedule reads their data read-only, and keeps its own cut-status records (Carcase/Colour board/Solid Surface, under each project's "Project Saves/Machining Flags") alongside it -- once every applicable cut is Done or N/A, it marks the item "machined" in the same shared status records they already all read. It also shares their name+PIN registry. Nothing about those apps changes.</p>
     <button class="btn" id="chooseRootBtn">Choose Projects folder</button>
     <p class="error-note" id="setupError" hidden></p>
   </section>
@@ -661,11 +727,26 @@
         <option value="yes">Fully machined</option>
       </select>
       <input type="text" id="overallSearchInput" placeholder="Search ID or work order #">
+      <!-- Filter tick boxes (2026-09-26, v9 addendum) -- see wireHideTickBox.
+           "Hide machined" = the item is fully machined (its status has
+           reached Machined or beyond -- the same signal the Fully machined
+           filter and the item page's badge use); "Hide delivered" /
+           "Hide installed" = the item's current status is exactly that
+           stage. This app's tables list every item whatever its stage, so
+           all three apply here. Default unticked; remembered per device. -->
+      <label class="tick"><input type="checkbox" id="overallHideMachined"> Hide machined</label>
+      <label class="tick"><input type="checkbox" id="overallHideDelivered"> Hide delivered</label>
+      <label class="tick"><input type="checkbox" id="overallHideInstalled"> Hide installed</label>
       <button class="btn secondary sm" id="refreshOverallBtn">Refresh</button>
     </div>
+    <p class="count-line" id="overallCountLine" hidden></p>
     <div class="card" id="overallLoadingCard">
       <p class="sub" style="margin:0;">Reading every project...</p>
     </div>
+    <!-- (2026-09-25, sweep -- v9) Shown instead of the loading card when the
+         table was painted instantly from its last-known snapshot and is
+         being refreshed from the folder behind it. -->
+    <p class="refresh-note" id="overallRefreshNote" hidden>Showing last-known cut status — refreshing from the folder…</p>
     <div class="card table-scroll" id="overallTableCard" hidden>
       <table class="sched-table" id="overallTable">
         <thead>
@@ -719,7 +800,16 @@
         <option value="yes">Fully machined</option>
       </select>
       <input type="text" id="projSearchInput" placeholder="Search ID or work order #">
+      <label class="tick"><input type="checkbox" id="projHideMachined"> Hide machined</label>
+      <label class="tick"><input type="checkbox" id="projHideDelivered"> Hide delivered</label>
+      <label class="tick"><input type="checkbox" id="projHideInstalled"> Hide installed</label>
+      <!-- (2026-09-25, sweep -- v9) The Overall table had a Refresh button,
+           this one didn't; now that a project paints from its last-known
+           snapshot first, "re-read the folder now" is a real need here too. -->
+      <button class="btn secondary sm" id="refreshProjectBtn">Refresh</button>
     </div>
+    <p class="count-line" id="projCountLine" hidden></p>
+    <p class="refresh-note" id="projRefreshNote" hidden>Showing last-known cut status — refreshing from the folder…</p>
     <div class="card table-scroll">
       <table class="sched-table" id="projTable">
         <thead>
@@ -954,15 +1044,34 @@
      same one-database-per-app pattern already established across the
      family. Only ever holds this app's own Projects-root folder handle. */
   var DB_NAME = "utzline-machine-schedule-db", STORE = "session";
+  /* One connection, opened once and reused (2026-09-25, family-wide sweep --
+     v9; the same fix Install ITP v35 and Scheduler v19 shipped after
+     Andrew's "still having slow down after a little use, (possibly caching
+     issues)"). This used to open a NEW IndexedDB connection on every
+     idbGet/idbSet and never close it -- harmless when the app touched
+     IndexedDB once at boot, but this round also puts every screen's
+     last-known snapshot and the folded-event cache in here (see the
+     snapshot helpers below), so it is now read on every screen open and
+     written on every refresh. Now: open once, keep it; reopen only if the
+     browser closes it (versionchange / close). Same fix for the identity
+     store. */
+  var idbConnP = null;
   function idbOpen(){
-    return new Promise(function(res, rej){
+    if (idbConnP) return idbConnP;
+    idbConnP = new Promise(function(res, rej){
       try{
         var r = indexedDB.open(DB_NAME, 1);
         r.onupgradeneeded = function(){ r.result.createObjectStore(STORE); };
-        r.onsuccess = function(){ res(r.result); };
-        r.onerror = function(){ rej(r.error); };
-      }catch(e){ rej(e); }
+        r.onsuccess = function(){
+          var db = r.result;
+          db.onversionchange = function(){ db.close(); idbConnP = null; };
+          db.onclose = function(){ idbConnP = null; };
+          res(db);
+        };
+        r.onerror = function(){ idbConnP = null; rej(r.error); };
+      }catch(e){ idbConnP = null; rej(e); }
     });
+    return idbConnP;
   }
   function idbSet(key, val){
     return idbOpen().then(function(db){
@@ -985,6 +1094,28 @@
     });
   }
 
+  /* ---- Last-known snapshots (2026-09-25, sweep -- v9; "icon caching like
+     we just did"). The design rule proven on Andrew's tablet during the
+     ITP rounds: on Android + Dropbox every File System Access call costs
+     hundreds of ms and a named lookup scans its folder, so a screen must
+     never make the person wait on the folder to show what it showed last
+     time. Each screen's last successful result (Home's project list, the
+     Overall Machine Schedule's rows, each project's rows + plan levels) is
+     kept in this app's own IndexedDB, keyed under the current Projects-root
+     name so a different root never paints another root's data; on open the
+     screen paints that snapshot instantly (with a "refreshing…" note),
+     reads the folder in the background, then repaints and re-saves.
+     Best-effort in both directions -- a failed get paints nothing early, a
+     failed set is ignored -- the folder read is always the truth. Rows are
+     stored WITHOUT their project directory handle (see rowToSnapshot) and
+     get it back lazily via ensureRowProjectHandle the moment a row action
+     needs it. (The README's old "this app has no local cache to go stale"
+     line is retired with this -- the cache is never trusted over a live
+     read, only shown until one arrives.) */
+  function snapKey(kind, name){ return "snap\u0000" + (projectsRootName || "") + "\u0000" + kind + (name != null ? "\u0000" + name : ""); }
+  function snapGet(kind, name){ return idbGet(snapKey(kind, name)).catch(function(){ return null; }); }
+  function snapSet(kind, name, value){ return idbSet(snapKey(kind, name), value).catch(function(){}); }
+
   /* ============================== shared per-device identity (UTZLINE Data Standard v1, §6) ==============================
      Andrew, verbatim (2026-09-23): "implement the username as per the
      delivery itp throughout the entire system, but instead of it opening a
@@ -1000,13 +1131,21 @@
      store above) or vice versa -- just this one small shared pair. */
   var IDENTITY_DB_NAME = "utzline-identity", IDENTITY_STORE = "kv", IDENTITY_KEY = "deviceUserName";
   var deviceUserName = "";
-  function identityDbOpen(){
-    return new Promise(function(resolve, reject){
+  var identityConnP = null;
+  function identityDbOpen(){ // one connection, reused -- see idbOpen above (2026-09-25, sweep)
+    if (identityConnP) return identityConnP;
+    identityConnP = new Promise(function(resolve, reject){
       var req = indexedDB.open(IDENTITY_DB_NAME, 1);
       req.onupgradeneeded = function(){ req.result.createObjectStore(IDENTITY_STORE); };
-      req.onsuccess = function(){ resolve(req.result); };
-      req.onerror = function(){ reject(req.error); };
+      req.onsuccess = function(){
+        var db = req.result;
+        db.onversionchange = function(){ db.close(); identityConnP = null; };
+        db.onclose = function(){ identityConnP = null; };
+        resolve(db);
+      };
+      req.onerror = function(){ identityConnP = null; reject(req.error); };
     });
+    return identityConnP;
   }
   function getDeviceUserName(){
     return identityDbOpen().then(function(db){
@@ -1098,6 +1237,120 @@
   }
   function listExistingProjects(rootHandle){ return listSubdirNames(rootHandle); }
 
+  /* ============================== directory-handle cache (2026-09-25, sweep -- v9) ==============================
+     Ported in shape from Install ITP's getCachedDir/projectDir (via
+     Scheduler v19). On Android every getDirectoryHandle() is a real
+     cross-process Storage Access Framework call (hundreds of ms on
+     Andrew's tablet, and a named lookup scans its folder), and this app
+     re-walked the same fixed paths from a project root on every read --
+     one Overall Machine Schedule open did "Project Saves" -> "Joinery
+     Status" (twice: once to check it exists, once to list it) and the same
+     again for "Machining Flags", per project, and then AGAIN per item for
+     its own event folder; and a cut tap did it all over again for the
+     whole project (or, from the Overall table, EVERY project). A directory
+     handle stays valid for as long as the folder exists, so every such
+     walk is memoised here per project name (unique under one Projects
+     root). Cleared when a different root is chosen; any one entry is
+     dropped the moment an operation through it fails (folder renamed/
+     removed underneath us) so the next call re-resolves from scratch. Only
+     SUCCESSFUL resolutions are cached -- a create:false miss is never
+     remembered, because that folder may legitimately appear a moment later
+     (another app creating it, or Dropbox syncing it in). */
+  var dirHandleCache = {};
+  var migratedThisSession = {};
+  function invalidateDirHandleCache(){ dirHandleCache = {}; migratedThisSession = {}; }
+  function dirCacheKey(baseKey, segments){ return baseKey + "\u0000" + segments.join("\u0000"); }
+  function getCachedDir(baseHandle, baseKey, segments, create){
+    var key = dirCacheKey(baseKey, segments);
+    if (dirHandleCache[key]) return Promise.resolve(dirHandleCache[key]);
+    var parentP = segments.length > 1
+      ? getCachedDir(baseHandle, baseKey, segments.slice(0, -1), create)
+      : Promise.resolve(baseHandle);
+    return parentP.then(function(parentH){
+      return parentH.getDirectoryHandle(segments[segments.length - 1], { create: !!create });
+    }).then(function(h){
+      dirHandleCache[key] = h;
+      return h;
+    });
+  }
+  function projectDir(projectHandle, segments, create){
+    return getCachedDir(projectHandle, "project\u0000" + (projectHandle && projectHandle.name || ""), segments, create);
+  }
+  function forgetProjectDir(projectHandle, segments){
+    var prefix = dirCacheKey("project\u0000" + (projectHandle && projectHandle.name || ""), segments);
+    Object.keys(dirHandleCache).forEach(function(k){
+      if (k === prefix || k.indexOf(prefix + "\u0000") === 0) delete dirHandleCache[k];
+    });
+  }
+  // The project directory handle for a name under the chosen root --
+  // memoised the same way (one named lookup per project per session, not
+  // one per table row action).
+  function getProjectHandleByName(name){
+    return getCachedDir(projectsRootHandle, "root", [name], false);
+  }
+
+  /* ============================== "unreadable is not empty" (2026-09-25, sweep -- v9) ==============================
+     Site Measure v46's rule (see its readFlatLevelFileByName), applied to
+     every read in this app that feeds a WRITE or a "nothing exists, start
+     fresh" decision. On a Dropbox-synced Android folder a file mid-sync
+     reads as truncated or unparseable for a moment; before this round every
+     such failure collapsed to []/null, and these paths then acted on that
+     empty result as if it were the truth:
+       - readUsersCsv -> [] -> "Add a new name" wrote a utzline-users.csv
+         holding ONLY the new name, wiping every other person's row;
+       - migrateLegacyJoineryStatusIfNeeded created the events folder FIRST
+         and then read joinery-status.json -> [] -> an empty events folder,
+         after which no app in the family ever reads the legacy file again
+         (every status history "gone" from every app's point of view);
+       - migrateLegacyMachiningFlagsIfNeeded, identically, for this app's
+         own legacy machining-flags.json (every cut already recorded gone);
+       - setJoineryStatusForward / setMachiningCutState folded an item's
+         event files softly before deciding whether to WRITE "machined" --
+         one mid-sync "revert to pending" event skipped and the item would
+         be advanced to Machined on a forward-only pipeline that never
+         takes it back.
+     These helpers tell the two cases apart: NotFoundError (genuinely absent
+     -> fresh is fine) versus anything else (-> one retry after a short
+     pause, since the field failures are transient, then reject with
+     {code:"read_failed"} so the caller surfaces an error and does NOT
+     write). Pure-display reads that keep failing soft say so in their own
+     comment at the call site. */
+  function isNotFoundErr(err){ return !!(err && (err.name === "NotFoundError" || err.name === "TypeMismatchError")); }
+  function readFailedErr(what, err){ var e = new Error("Couldn't read " + what + (err && err.message ? " (" + err.message + ")" : "")); e.code = "read_failed"; e.cause = err; return e; }
+  function isReadFailed(err){ return !!(err && err.code === "read_failed"); }
+  function pause(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  var READ_RETRY_MS = 600;
+  // Resolves { found:true, value } / { found:false, value:null }; rejects
+  // read_failed for anything that isn't a clean NotFound. `parse(text)`
+  // turns the file's text into the resolved value and may throw (a
+  // truncated file that won't JSON.parse is the transient case this exists
+  // for), so it sits INSIDE the retried attempt.
+  function readTextFileStrict(dirHandle, fileName, what, parse){
+    function attempt(){
+      return dirHandle.getFileHandle(fileName, { create: false }).then(function(fh){
+        return fh.getFile().then(function(file){ return file.text(); }).then(function(text){
+          var value;
+          try{ value = parse ? parse(text) : text; }catch(e){ return Promise.reject(readFailedErr(what, e)); }
+          return { found: true, value: value };
+        }, function(err){ return Promise.reject(isReadFailed(err) ? err : readFailedErr(what, err)); });
+      }, function(err){
+        if (isNotFoundErr(err)) return { found: false, value: null };
+        return Promise.reject(readFailedErr(what, err));
+      });
+    }
+    return attempt().catch(function(){ return pause(READ_RETRY_MS).then(attempt); });
+  }
+  // Same, for a JSON array file: resolves the array, or [] ONLY when the
+  // file genuinely isn't there; a file that exists but won't parse (or
+  // parses to something that isn't an array) rejects read_failed.
+  function readJsonArrayFileStrict(dirHandle, fileName, what){
+    return readTextFileStrict(dirHandle, fileName, what, function(text){
+      var parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) throw new Error("not a JSON array");
+      return parsed;
+    }).then(function(res){ return res.found ? res.value : []; });
+  }
+
   /* ============================== shared name+PIN registry (CSV) ==============================
      Copied verbatim from UTZLINE Delivery ITP's own reference implementation
      of Andrew's identity-selector instruction (see the identity-row comment
@@ -1168,14 +1421,19 @@
   }
   // Always re-reads the live file -- never trusts a stale in-memory copy,
   // since another device or another app could have changed it since this
-  // page loaded. Resolves to [] both when the file doesn't exist yet and
-  // when it's empty/unparseable, so callers never need a separate
-  // "not found" branch.
+  // page loaded. Resolves to [] ONLY when the file genuinely doesn't exist
+  // yet. (2026-09-25, sweep -- v9, "unreadable is not empty") It used to
+  // resolve [] for ANY failure, and beginAddNewIdentityFlow then pushed the
+  // new row onto that empty list and wrote it back whole -- so a
+  // utzline-users.csv that was mid-Dropbox-sync for a moment would have
+  // been rewritten with only the new name in it, every other person's row
+  // gone. Now a file that exists but can't be read rejects (read_failed,
+  // after one retry); the add-name flow refuses to write and says so, and
+  // every PIN check (sign-in AND the cut lockout's re-confirm) reports a
+  // read problem rather than "Incorrect PIN".
   function readUsersCsv(){
     if (!projectsRootHandle) return Promise.resolve([]);
-    return projectsRootHandle.getFileHandle(USERS_CSV_NAME, { create: false }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){ return file.text(); }).then(function(text){
+    return readTextFileStrict(projectsRootHandle, USERS_CSV_NAME, USERS_CSV_NAME, function(text){
       var rows = csvParseText(text);
       if (!rows.length) return [];
       var start = (rows[0] && String(rows[0][0] || "").trim().toLowerCase() === "name") ? 1 : 0;
@@ -1186,7 +1444,7 @@
         out.push({ name: r[0] || "", pin: r[1] || "", showInApps: r[2] || "" });
       }
       return out;
-    }, function(){ return []; }); // no file yet -- not an error
+    }).then(function(res){ return res.found ? res.value : []; });
   }
   function writeUsersCsv(rows){
     var lines = [USERS_CSV_HEADER];
@@ -1224,28 +1482,29 @@
   }
   function projectSavesDirName(){ return "Project Saves"; }
   function floorPlansDirName(){ return "Floor Plans"; }
+  // Read-only (create:false), memoised per project -- see getCachedDir.
   function getFloorPlansDir(projectHandle){
-    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: false }).then(function(psH){
-      return psH.getDirectoryHandle(floorPlansDirName(), { create: false });
-    });
+    return projectDir(projectHandle, [projectSavesDirName(), floorPlansDirName()], false);
   }
   function levelFileName(projectName, levelName){
     return sanitizeFileBase(projectName) + " - " + sanitizeFileBase(levelName) + ".json";
   }
   // Read-only: this app never creates "Project Saves/Floor Plans/" itself
-  // (create:false throughout) -- a flat project with no plan saved for this
-  // particular level yet resolves null here, same as before.
+  // (create:false throughout). Resolves the parsed level, or null ONLY when
+  // the file genuinely isn't there (no Floor Plans folder yet / no such
+  // file). (2026-09-25, sweep -- v9; Site Measure v46's readFlatLevelFileByName
+  // shape) A file that EXISTS but can't be read or parsed (a Dropbox
+  // placeholder still syncing in, a truncated read on an Android SAF
+  // folder) REJECTS with {code:"read_failed"} instead of quietly reading as
+  // "no plan": before this, readLevelFile turned that into "No saved plan
+  // found for this level yet." -- a label that lied for a level that very
+  // much exists. This app never writes level files, so this is a display
+  // read, but the caller now says "couldn't read, try again" instead.
   function readLevelFileByName(projectHandle, fname){
     return getFloorPlansDir(projectHandle).then(function(dirH){
-      return dirH.getFileHandle(fname);
-    }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){
-      return file.text();
-    }).then(function(text){
-      try{
+      return readTextFileStrict(dirH, fname, "level file " + fname, function(text){
         var parsed = JSON.parse(text);
-        if (!parsed || typeof parsed !== "object" || !parsed.name) return null;
+        if (!parsed || typeof parsed !== "object" || !parsed.name) throw new Error("level file has no name field");
         return {
           name: parsed.name,
           imageDataURL: parsed.imageDataURL || null,
@@ -1254,8 +1513,12 @@
           imageH: parsed.imageH || 0,
           markers: Array.isArray(parsed.markers) ? parsed.markers : []
         };
-      }catch(e){ return null; }
-    }, function(){ return null; });
+      }).then(function(res){ return res.found ? res.value : null; });
+    }, function(err){
+      if (isNotFoundErr(err)) return null; // no "Project Saves/Floor Plans" at all -- a legacy or brand-new project
+      forgetProjectDir(projectHandle, [projectSavesDirName()]);
+      return Promise.reject(readFailedErr("Floor Plans folder", err));
+    });
   }
   // Legacy per-Level-folder plan reader -- ported unchanged from this
   // app's UTZLINE Scheduler fork (itself fixed there after Andrew reported
@@ -1268,29 +1531,30 @@
   // kept in sync with that file's naming/schema so a file either app reads
   // is read back identically).
   function legacyLevelSaveFilename(levelName){ return sanitizeFileBase(levelName) + ".utzline.json"; }
+  // Same strict rule as readLevelFileByName (2026-09-25, sweep -- v9): null
+  // only for a genuinely absent legacy file, read_failed for one that
+  // exists but won't read.
   function readLegacyLevelFile(projectHandle, levelName){
     if (!projectHandle) return Promise.resolve(null);
     return projectHandle.getDirectoryHandle(levelName, { create: false }).then(function(levelH){
       return levelH.getDirectoryHandle("saves", { create: false });
     }).then(function(savesH){
-      return savesH.getFileHandle(legacyLevelSaveFilename(levelName), { create: false });
-    }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){
-      return file.text();
-    }).then(function(text){
-      var parsed = null;
-      try{ parsed = JSON.parse(text); }catch(e){ parsed = null; }
-      if (!parsed || typeof parsed !== "object") return null;
-      return {
-        name: levelName,
-        imageDataURL: parsed.imageDataURL || null,
-        imageTiles: parsed.imageTiles || null,
-        imageW: parsed.imageW || 0,
-        imageH: parsed.imageH || 0,
-        markers: Array.isArray(parsed.objects) ? parsed.objects : []
-      };
-    }, function(){ return null; });
+      return readTextFileStrict(savesH, legacyLevelSaveFilename(levelName), "legacy level file for " + levelName, function(text){
+        var parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== "object") throw new Error("not a level object");
+        return {
+          name: levelName,
+          imageDataURL: parsed.imageDataURL || null,
+          imageTiles: parsed.imageTiles || null,
+          imageW: parsed.imageW || 0,
+          imageH: parsed.imageH || 0,
+          markers: Array.isArray(parsed.objects) ? parsed.objects : []
+        };
+      }).then(function(res){ return res.found ? res.value : null; });
+    }, function(err){
+      if (isNotFoundErr(err)) return null;
+      return Promise.reject(readFailedErr("legacy level folder for " + levelName, err));
+    });
   }
   // Tries the flat shape first (the common case for anything touched by
   // Site Measure/Projects since the cutover), then falls back to the
@@ -1298,7 +1562,9 @@
   // ITP app already uses. Whichever shape actually has a real image wins;
   // a flat record with no image (an empty placeholder) still falls through
   // to a legacy file if one exists, rather than reporting "no plan" when
-  // one is genuinely there.
+  // one is genuinely there. A read_failed from either shape propagates
+  // (each reader already retried once) -- openPlanCanvasForLevel tells the
+  // person to try again rather than claiming there's no plan.
   function readLevelFile(projectHandle, projectName, levelName){
     if (!projectHandle) return Promise.resolve(null);
     return readLevelFileByName(projectHandle, levelFileName(projectName, levelName)).then(function(flatLevel){
@@ -1310,27 +1576,59 @@
       });
     });
   }
+  // (2026-09-25, sweep -- v9; Site Measure v46's own listFlatLevelNames)
+  // Used to read and JSON.parse EVERY level file in the project -- each one
+  // carrying its full base64 floor plan, often several MB -- one after
+  // another (a sequential reduce chain, each a named lookup + a full body
+  // read), just to pull out each file's `name` field, every time a project
+  // schedule was opened. On Andrew's tablet that alone was seconds per
+  // visit. Now: the file handles come straight from the ONE folder listing
+  // (no named re-lookup per file), they're stat'ed in parallel (getFile()
+  // gives size + lastModified without reading the body), and a per-project
+  // IndexedDB note of "<file> -> name @ size/lastModified" answers every
+  // file that hasn't changed since last time; only a new or changed file is
+  // actually read. Pure display (the level picker): an unreadable file
+  // (mid-sync) is skipped for this listing rather than failing the whole
+  // list, deliberately -- nothing is ever written from this result.
   function listFlatLevelNames(projectHandle){
+    var cacheKey = "flatLevelNames\u0000" + (projectsRootName || "") + "\u0000" + ((projectHandle && projectHandle.name) || "");
     return getFloorPlansDir(projectHandle).then(function(dirH){
-      var fnames = [];
+      var handles = [];
       var iter = dirH.values();
       function step(){
         return iter.next().then(function(res){
-          if (res.done) return fnames;
-          if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) fnames.push(res.value.name);
+          if (res.done) return handles;
+          if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) handles.push(res.value);
           return step();
         });
       }
       return step();
-    }, function(){ return []; }).then(function(fnames){
-      return fnames.reduce(function(chain, fname){
-        return chain.then(function(acc){
-          return readLevelFileByName(projectHandle, fname).then(function(level){
-            if (level) acc.push(level.name);
-            return acc;
-          });
+    }, function(){ return []; }).then(function(handles){
+      if (!handles.length) return [];
+      return idbGet(cacheKey).catch(function(){ return null; }).then(function(cached){
+        cached = (cached && typeof cached === "object") ? cached : {};
+        var next = {};
+        return Promise.all(handles.map(function(fh){
+          return fh.getFile().then(function(file){
+            var hit = cached[fh.name];
+            var statKnown = typeof file.size === "number" && typeof file.lastModified === "number";
+            if (statKnown && hit && hit.name && hit.size === file.size && hit.lastModified === file.lastModified){
+              next[fh.name] = hit;
+              return hit.name;
+            }
+            return file.text().then(function(text){
+              var parsed = null;
+              try{ parsed = JSON.parse(text); }catch(e){ parsed = null; }
+              var name = (parsed && typeof parsed === "object" && parsed.name) ? parsed.name : null;
+              if (name && statKnown) next[fh.name] = { name: name, size: file.size, lastModified: file.lastModified };
+              return name;
+            });
+          }).catch(function(){ return null; });
+        })).then(function(names){
+          idbSet(cacheKey, next).catch(function(){});
+          return names.filter(Boolean);
         });
-      }, Promise.resolve([]));
+      });
     }).then(function(names){
       return names.sort(function(a, b){ return a.localeCompare(b, undefined, { sensitivity: "base" }); });
     });
@@ -1363,15 +1661,14 @@
   }
 
   /* ============================== joinery items (read-only) ============================== */
+  // [] only when the file genuinely isn't there (a project with no items
+  // yet); a file that exists but won't read/parse rejects read_failed
+  // (2026-09-25, sweep -- v9) so the table says "couldn't read" instead of
+  // "No joinery items in this project yet." for a project that has plenty,
+  // and a plan-marker tap says so instead of "no matching item record".
   function readJoineryItems(projectHandle){
     if (!projectHandle) return Promise.resolve([]);
-    return projectHandle.getFileHandle("joinery-items.json", { create: false }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){
-      return file.text();
-    }).then(function(text){
-      try{ var arr = JSON.parse(text); return Array.isArray(arr) ? arr : []; }catch(e){ return []; }
-    }, function(){ return []; });
+    return readJsonArrayFileStrict(projectHandle, "joinery-items.json", "joinery-items.json");
   }
 
   /* ============================== shared joinery-status pipeline ==============================
@@ -1441,15 +1738,45 @@
      after this update -- the old file is left on disk afterward,
      untouched. */
   function joineryStatusEventsBranchName(){ return "Joinery Status"; }
+  // Memoised per project (getCachedDir) -- the whole family re-walked
+  // "Project Saves" -> "Joinery Status" on every read; now once per session.
   function getJoineryStatusEventsRootDir(projectHandle, create){
-    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: !!create }).then(function(psH){
-      return psH.getDirectoryHandle(joineryStatusEventsBranchName(), { create: !!create });
-    });
+    return projectDir(projectHandle, [projectSavesDirName(), joineryStatusEventsBranchName()], !!create);
   }
   function getJoineryStatusItemDir(projectHandle, key, create){
     return getJoineryStatusEventsRootDir(projectHandle, create).then(function(rootH){
       return rootH.getDirectoryHandle(key, { create: !!create });
     });
+  }
+  // Every per-item event folder directly under an events root, as the
+  // HANDLES the listing already hands back -- not names to look up again
+  // one by one (2026-09-25, sweep -- v9: that was one named folder scan per
+  // item per read, on top of the two-level walk above, for every item in
+  // every project, for BOTH event branches this app folds).
+  function listEventItemDirs(rootH){
+    var dirs = [];
+    var iter = rootH.values();
+    function step(){
+      return iter.next().then(function(res){
+        if (res.done) return dirs;
+        if (res.value && res.value.kind === "directory") dirs.push(res.value);
+        return step();
+      });
+    }
+    return step();
+  }
+  function listJsonFileHandlesIn(dirH){
+    if (!dirH || typeof dirH.values !== "function") return Promise.resolve([]);
+    var handles = [];
+    var iter = dirH.values();
+    function step(){
+      return iter.next().then(function(res){
+        if (res.done) return handles;
+        if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) handles.push(res.value);
+        return step();
+      });
+    }
+    return step();
   }
   function statusEventStamp(d){
     d = d || new Date();
@@ -1467,28 +1794,79 @@
     var slug = sanitizeUserName(user) || "Unnamed";
     return slug + " - " + stamp + " - " + kind + ".json";
   }
+  // Pure-display read, deliberately soft (2026-09-25 audit -- v9): one event
+  // file that's mid-sync reads as null and is left out of THIS fold -- the
+  // tables then show that item one stage (or one cut) behind for a moment
+  // and catch up on the next refresh. Nothing is ever written from a table
+  // fold. The two paths that DO feed a write -- setJoineryStatusForward's
+  // forward-only guard and setMachiningCutState's "is every cut addressed
+  // now?" check -- use the strict variant below instead, so a skipped file
+  // can never turn into a "machined" event that the forward-only pipeline
+  // would never take back.
   function readJsonFileHandle(fh){
     return fh.getFile().then(function(file){ return file.text(); }).then(function(text){
       try{ var parsed = JSON.parse(text); return (parsed && typeof parsed === "object") ? parsed : null; }catch(e){ return null; }
     }, function(){ return null; });
   }
-  function listJoineryStatusEventsForItem(projectHandle, key){
-    return getJoineryStatusItemDir(projectHandle, key, false).then(function(dirH){
-      if (!dirH || typeof dirH.values !== "function") return [];
-      var handles = [];
-      var iter = dirH.values();
-      function step(){
-        return iter.next().then(function(res){
-          if (res.done) return handles;
-          if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) handles.push(res.value);
-          return step();
-        });
-      }
-      return step();
-    }, function(){ return []; }).then(function(handles){
-      return Promise.all(handles.map(readJsonFileHandle));
-    }).then(function(events){
-      return events.filter(function(e){ return e && typeof e === "object"; });
+  function readJsonFileHandleStrict(fh){
+    function attempt(){
+      return fh.getFile().then(function(file){ return file.text(); }).then(function(text){
+        var parsed;
+        try{ parsed = JSON.parse(text); }catch(e){ return Promise.reject(readFailedErr(fh.name, e)); }
+        if (!parsed || typeof parsed !== "object") return Promise.reject(readFailedErr(fh.name, new Error("not a JSON object")));
+        return parsed;
+      }, function(err){ return Promise.reject(isReadFailed(err) ? err : readFailedErr(fh.name, err)); });
+    }
+    return attempt().catch(function(){ return pause(READ_RETRY_MS).then(attempt); });
+  }
+  // STRICT per-item event read: every file in the item's folder must read
+  // cleanly (one retry each) or this rejects read_failed; [] only when the
+  // item genuinely has no event folder yet. Used by both write funnels.
+  function readEventsForItemStrict(itemDirP, what){
+    return itemDirP.then(function(dirH){
+      return listJsonFileHandlesIn(dirH).then(function(handles){
+        return Promise.all(handles.map(readJsonFileHandleStrict));
+      });
+    }, function(err){
+      if (isNotFoundErr(err)) return [];
+      return Promise.reject(readFailedErr(what, err));
+    });
+  }
+  /* Folded-event cache (2026-09-25, sweep -- v9; speed). Every event file
+     in "Joinery Status" / "Machining Flags" is IMMUTABLE by design (one
+     file per action, named "<user> - <yyyy-mm-dd hh-mm-ss-mmm> - <kind>.json",
+     never rewritten -- see the v5/v6 notes), so the exact SET of filenames
+     in an item's folder fully determines its fold. The listing already
+     hands those names back for free; what cost a call each was the
+     getFile() per event file, on every item, on every table open -- ~3-6
+     calls per item across both branches, hundreds per project, hundreds of
+     ms each on Andrew's tablet. Now each item's last fold is remembered in
+     this app's own IndexedDB against that filename set and reused verbatim
+     while the set is unchanged; only an item with a new event file is
+     actually read. Only a fold in which EVERY file read cleanly is
+     remembered -- a fold that had to skip a mid-sync file is recomputed
+     next time ("unreadable is not empty" carries through to the cache). */
+  function readFoldedEventBranch(projectHandle, rootH, branch, foldFn){
+    var cacheKey = "eventFolds\u0000" + (projectsRootName || "") + "\u0000" + ((projectHandle && projectHandle.name) || "") + "\u0000" + branch;
+    return Promise.all([listEventItemDirs(rootH), idbGet(cacheKey).catch(function(){ return null; })]).then(function(r){
+      var dirs = r[0], cached = (r[1] && typeof r[1] === "object") ? r[1] : {};
+      var next = {};
+      return Promise.all(dirs.map(function(dirH){
+        return listJsonFileHandlesIn(dirH).then(function(handles){
+          var sig = handles.map(function(h){ return h.name; }).sort().join("\u0000");
+          var hit = cached[dirH.name];
+          if (hit && hit.sig === sig){ next[dirH.name] = hit; return hit.rec; }
+          return Promise.all(handles.map(readJsonFileHandle)).then(function(events){
+            var allRead = events.every(function(e){ return e && typeof e === "object"; });
+            var rec = foldFn(events.filter(function(e){ return e && typeof e === "object"; }));
+            if (allRead) next[dirH.name] = { sig: sig, rec: rec };
+            return rec;
+          });
+        }, function(){ return null; });
+      })).then(function(list){
+        idbSet(cacheKey, next).catch(function(){});
+        return list.filter(Boolean);
+      });
     });
   }
   function foldJoineryStatusEvents(events){
@@ -1513,21 +1891,37 @@
     if (latestJobNote){ rec.jobNote = true; rec.jobNoteAt = latestJobNote.at; rec.jobNoteBy = latestJobNote.by || ""; }
     return rec;
   }
+  // [] only when the legacy file genuinely isn't there; read_failed for one
+  // that exists but won't read -- see migrateLegacyJoineryStatusIfNeeded.
   function readLegacyJoineryStatusFile(projectHandle){
-    return projectHandle.getFileHandle("joinery-status.json", { create: false }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){
-      return file.text();
-    }).then(function(text){
-      try{ var arr = JSON.parse(text); return Array.isArray(arr) ? arr : []; }catch(e){ return []; }
-    }, function(){ return []; });
+    return readJsonArrayFileStrict(projectHandle, "joinery-status.json", "joinery-status.json");
   }
+  /* (2026-09-25, sweep -- v9; "unreadable is not empty", the most important
+     case in this app together with its machining-flags twin below.) The
+     original order was: create the events folder, THEN read the legacy
+     file, THEN write one event per history entry -- with the legacy read
+     collapsing every failure to []. On a Dropbox-synced Android folder that
+     meant: legacy file mid-sync -> reads as nothing -> an EMPTY events
+     folder is created -> from that moment every app in the family sees the
+     events folder exists and never reads the legacy file again -> every
+     item's status history gone from every app's point of view, with the
+     legacy file still sitting there untouched. Now the legacy file is read
+     FIRST (strict: [] only for genuinely absent, one retry then read_failed
+     otherwise) and the events folder is only created once that read has
+     succeeded; a failed read rejects and creates NOTHING, so the next open
+     simply tries again. Also memoised per project per session -- once a
+     project is known to be migrated there's no reason to re-check the
+     folder on every read. */
   function migrateLegacyJoineryStatusIfNeeded(projectHandle){
+    var memoKey = (projectHandle && projectHandle.name || "") + "\u0000status";
+    if (migratedThisSession[memoKey]) return Promise.resolve(false);
     return getJoineryStatusEventsRootDir(projectHandle, false).then(function(){
+      migratedThisSession[memoKey] = true;
       return false;
-    }, function(){
-      return getJoineryStatusEventsRootDir(projectHandle, true).then(function(){
-        return readLegacyJoineryStatusFile(projectHandle);
+    }, function(err){
+      if (!isNotFoundErr(err)) return Promise.reject(readFailedErr("Joinery Status folder", err)); // can't tell -> don't migrate
+      return readLegacyJoineryStatusFile(projectHandle).then(function(list){
+        return getJoineryStatusEventsRootDir(projectHandle, true).then(function(){ return list; });
       }).then(function(list){
         var writes = [];
         list.forEach(function(rec){
@@ -1562,29 +1956,33 @@
           }
         });
         return Promise.all(writes);
-      }).then(function(){ return true; }).catch(function(){ return false; });
+      }).then(function(){ migratedThisSession[memoKey] = true; return true; }).catch(function(err){
+        // A legacy file that exists but couldn't be read is the one failure
+        // that must NOT be swallowed -- nothing was created, the caller
+        // surfaces it, and the next open tries again. (Per-event WRITE
+        // failures are still swallowed individually, as in every app's copy
+        // of this migration -- see the README's "deliberately left alone".)
+        if (isReadFailed(err)) return Promise.reject(err);
+        return false;
+      });
     });
   }
+  // Rejects read_failed only when the legacy file (or the events folder's
+  // own existence check) can't be read -- the loaders then say so rather
+  // than showing every item as "Created". Per-item event folders are read
+  // straight from the handles the listing returns (listEventItemDirs), in
+  // parallel, through the folded-event cache -- no named lookup per item.
   function readJoineryStatuses(projectHandle){
     if (!projectHandle) return Promise.resolve([]);
     return migrateLegacyJoineryStatusIfNeeded(projectHandle).then(function(){
-      return getJoineryStatusEventsRootDir(projectHandle, false).then(function(rootH){
-        var keys = [];
-        var iter = rootH.values();
-        function step(){
-          return iter.next().then(function(res){
-            if (res.done) return keys;
-            if (res.value && res.value.kind === "directory") keys.push(res.value.name);
-            return step();
-          });
-        }
-        return step();
-      }, function(){ return null; });
-    }).then(function(keys){
-      if (keys === null) return readLegacyJoineryStatusFile(projectHandle);
-      return Promise.all(keys.map(function(key){
-        return listJoineryStatusEventsForItem(projectHandle, key).then(foldJoineryStatusEvents);
-      })).then(function(list){ return list.filter(Boolean); });
+      return getJoineryStatusEventsRootDir(projectHandle, false).then(null, function(err){
+        if (isNotFoundErr(err)) return null;
+        forgetProjectDir(projectHandle, [projectSavesDirName()]);
+        return Promise.reject(readFailedErr("Joinery Status folder", err));
+      });
+    }).then(function(rootH){
+      if (rootH === null) return readLegacyJoineryStatusFile(projectHandle);
+      return readFoldedEventBranch(projectHandle, rootH, joineryStatusEventsBranchName(), foldJoineryStatusEvents);
     });
   }
   function findJoineryStatus(list, level, room, joineryId){
@@ -1619,10 +2017,10 @@
     return sanitizeFileBase(levelName) + " - " + sanitizeFileBase(roomName) + (joineryCode ? " - " + sanitizeFileBase(joineryCode) : "");
   }
   function jobNotesBranchName(){ return "Job Notes"; }
+  // "Project Saves/Job Notes" memoised per project (getCachedDir); the
+  // per-item folder is still looked up live (it may appear at any time).
   function getJobNotesDirForItem(projectHandle, key){
-    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: false }).then(function(psH){
-      return psH.getDirectoryHandle(jobNotesBranchName(), { create: false });
-    }).then(function(jnH){
+    return projectDir(projectHandle, [projectSavesDirName(), jobNotesBranchName()], false).then(function(jnH){
       return jnH.getDirectoryHandle(key, { create: false });
     });
   }
@@ -1674,18 +2072,28 @@
      distinct from the null the other writer apps return) instead of the one
      that was asked for -- callers use that to tell "just wrote it" apart
      from "was already there" without a separate read. */
-  function setJoineryStatusForward(projectHandle, level, room, joineryId, newStatus, updatedBy){
-    if (!projectHandle) return Promise.resolve(null);
+  // (2026-09-25, sweep -- v9) The forward-only guard now folds the item's
+  // events STRICTLY (readEventsForItemStrict): a "manufactured" event that
+  // was mid-sync and silently skipped would have read as "still
+  // in_manufacture", and this would have filed a spurious later "machined"
+  // event into the item's permanent history. A read_failed rejects here
+  // (nothing written) and the caller says so.
+  // The detailed core: resolves { written, status, at, by } -- `written`
+  // is what setMachiningCutState needs to patch a table row in place
+  // (the plain string the wrapper below returns can't tell "just wrote
+  // machined" from "was already machined").
+  function setJoineryStatusForwardDetailed(projectHandle, level, room, joineryId, newStatus, updatedBy){
+    if (!projectHandle) return Promise.resolve({ written: false, status: null, at: "", by: "" });
     var key = joineryItemPageKey(level, room, joineryId);
     return migrateLegacyJoineryStatusIfNeeded(projectHandle).then(function(){
-      return listJoineryStatusEventsForItem(projectHandle, key);
+      return readEventsForItemStrict(getJoineryStatusItemDir(projectHandle, key, false), "status events for " + key);
     }).then(function(events){
       var rec = foldJoineryStatusEvents(events);
       var curRank = rec ? joineryStatusRank(rec.status) : 0;
       var newRank = joineryStatusRank(newStatus);
-      if (newRank <= curRank) return rec ? rec.status : "";
+      if (newRank <= curRank) return { written: false, status: rec ? rec.status : "", at: rec ? rec.updatedAt : "", by: rec ? rec.updatedBy : "" };
       var atIso = new Date().toISOString();
-      var stamp = statusEventStamp();
+      var stamp = statusEventStamp(new Date(atIso));
       var payload = { kind: "status", level: level, room: room || "", joineryId: joineryId || "", status: newStatus, by: updatedBy || "", at: atIso };
       return getJoineryStatusItemDir(projectHandle, key, true).then(function(dirH){
         return dirH.getFileHandle(statusEventFileName(updatedBy, stamp, "status"), { create: true });
@@ -1693,8 +2101,15 @@
         return fh.createWritable();
       }).then(function(w){
         return w.write(JSON.stringify(payload)).then(function(){ return w.close(); });
-      }).then(function(){ return newStatus; });
+      }).then(function(){ return { written: true, status: newStatus, at: atIso, by: updatedBy || "" }; });
     });
+  }
+  // Same return convention as every writer app's copy (newStatus when
+  // written; otherwise the record's actual unchanged status, "" for no
+  // record at all -- this app's long-standing quirk, preserved).
+  function setJoineryStatusForward(projectHandle, level, room, joineryId, newStatus, updatedBy){
+    if (!projectHandle) return Promise.resolve(null);
+    return setJoineryStatusForwardDetailed(projectHandle, level, room, joineryId, newStatus, updatedBy).then(function(r){ return r.status; });
   }
   // Machined-column info for one enriched row: whether the item's already
   // reached "machined" or beyond (rank >= 3), and if so, who did it and
@@ -1806,33 +2221,40 @@
      time this app opens a project after this update -- the old file is
      left on disk afterward, untouched. */
   function machiningFlagsBranchName(){ return "Machining Flags"; }
+  // Memoised per project (getCachedDir) -- see getJoineryStatusEventsRootDir.
   function getMachiningFlagsEventsRootDir(projectHandle, create){
-    return projectHandle.getDirectoryHandle(projectSavesDirName(), { create: !!create }).then(function(psH){
-      return psH.getDirectoryHandle(machiningFlagsBranchName(), { create: !!create });
-    });
+    return projectDir(projectHandle, [projectSavesDirName(), machiningFlagsBranchName()], !!create);
   }
   function getMachiningFlagsItemDir(projectHandle, key, create){
     return getMachiningFlagsEventsRootDir(projectHandle, create).then(function(rootH){
       return rootH.getDirectoryHandle(key, { create: !!create });
     });
   }
-  function listMachiningFlagsEventsForItem(projectHandle, key){
-    return getMachiningFlagsItemDir(projectHandle, key, false).then(function(dirH){
-      if (!dirH || typeof dirH.values !== "function") return [];
-      var handles = [];
-      var iter = dirH.values();
-      function step(){
-        return iter.next().then(function(res){
-          if (res.done) return handles;
-          if (res.value && res.value.kind === "file" && /\.json$/i.test(res.value.name)) handles.push(res.value);
-          return step();
-        });
-      }
-      return step();
-    }, function(){ return []; }).then(function(handles){
-      return Promise.all(handles.map(readJsonFileHandle));
-    }).then(function(events){
-      return events.filter(function(e){ return e && typeof e === "object"; });
+  // (The old soft per-item listers are gone -- every per-item fold now
+  // either goes through the folded-event cache for the tables
+  // (readFoldedEventBranch) or the strict reader below.)
+  // STRICT single-item read (2026-09-25, sweep -- v9), for the two places
+  // one item's folded cuts feed a decision that gets WRITTEN or shown as
+  // the thing about to be changed: the plan-marker cut status panel (which
+  // used to fold EVERY item in the project just to show one -- a speed fix
+  // too: now one folder lookup and that item's own few files) and
+  // setMachiningCutState's post-write "is every cut addressed now?" check.
+  // Every event file for the item must read cleanly (one retry each) or
+  // this rejects read_failed; null only when the item genuinely has no
+  // event folder yet.
+  function readMachiningFlagsRecordForItem(projectHandle, level, room, joineryId){
+    var key = joineryItemPageKey(level, room, joineryId);
+    return migrateLegacyMachiningFlagsIfNeeded(projectHandle).then(function(){
+      return getMachiningFlagsEventsRootDir(projectHandle, false).then(function(rootH){
+        return readEventsForItemStrict(rootH.getDirectoryHandle(key, { create: false }), "cut events for " + key).then(foldMachiningFlags);
+      }, function(err){
+        // No events folder even after the migration check: a project with
+        // no cuts recorded yet (or whose migration couldn't complete) --
+        // same legacy-file fallback readMachiningFlags uses.
+        if (isNotFoundErr(err)) return readLegacyMachiningFlagsFile(projectHandle).then(function(list){ return findMachiningFlagsRecord(list, level, room, joineryId); });
+        forgetProjectDir(projectHandle, [projectSavesDirName()]);
+        return Promise.reject(readFailedErr("Machining Flags folder", err));
+      });
     });
   }
   function foldMachiningFlags(events){
@@ -1852,21 +2274,27 @@
     });
     return hasAnyNonPending ? rec : null;
   }
+  // [] only when the legacy file genuinely isn't there; read_failed for one
+  // that exists but won't read -- see migrateLegacyMachiningFlagsIfNeeded.
   function readLegacyMachiningFlagsFile(projectHandle){
-    return projectHandle.getFileHandle(machiningFlagsFilename(), { create: false }).then(function(fh){
-      return fh.getFile();
-    }).then(function(file){
-      return file.text();
-    }).then(function(text){
-      try{ var arr = JSON.parse(text); return Array.isArray(arr) ? arr : []; }catch(e){ return []; }
-    }, function(){ return []; });
+    return readJsonArrayFileStrict(projectHandle, machiningFlagsFilename(), machiningFlagsFilename());
   }
+  // Same reordering as migrateLegacyJoineryStatusIfNeeded (2026-09-25,
+  // sweep -- v9): read the legacy file FIRST, strictly; only then create the
+  // events folder and write the events. A legacy machining-flags.json that's
+  // mid-sync no longer becomes an empty "Machining Flags" folder that this
+  // app then trusts forever (every cut a machinist ever recorded before v6
+  // silently gone). Memoised per project per session.
   function migrateLegacyMachiningFlagsIfNeeded(projectHandle){
+    var memoKey = (projectHandle && projectHandle.name || "") + "\u0000flags";
+    if (migratedThisSession[memoKey]) return Promise.resolve(false);
     return getMachiningFlagsEventsRootDir(projectHandle, false).then(function(){
+      migratedThisSession[memoKey] = true;
       return false;
-    }, function(){
-      return getMachiningFlagsEventsRootDir(projectHandle, true).then(function(){
-        return readLegacyMachiningFlagsFile(projectHandle);
+    }, function(err){
+      if (!isNotFoundErr(err)) return Promise.reject(readFailedErr("Machining Flags folder", err)); // can't tell -> don't migrate
+      return readLegacyMachiningFlagsFile(projectHandle).then(function(list){
+        return getMachiningFlagsEventsRootDir(projectHandle, true).then(function(){ return list; });
       }).then(function(list){
         var writes = [];
         list.forEach(function(rec){
@@ -1887,29 +2315,27 @@
           });
         });
         return Promise.all(writes);
-      }).then(function(){ return true; }).catch(function(){ return false; });
+      }).then(function(){ migratedThisSession[memoKey] = true; return true; }).catch(function(err){
+        if (isReadFailed(err)) return Promise.reject(err); // legacy file exists but couldn't be read: nothing created, surface it
+        return false;
+      });
     });
   }
+  // Whole-project fold for the tables (soft per event file, through the
+  // folded-event cache -- see readFoldedEventBranch). Rejects read_failed
+  // only when the legacy file (or the events folder's existence check)
+  // can't be read.
   function readMachiningFlags(projectHandle){
     if (!projectHandle) return Promise.resolve([]);
     return migrateLegacyMachiningFlagsIfNeeded(projectHandle).then(function(){
-      return getMachiningFlagsEventsRootDir(projectHandle, false).then(function(rootH){
-        var keys = [];
-        var iter = rootH.values();
-        function step(){
-          return iter.next().then(function(res){
-            if (res.done) return keys;
-            if (res.value && res.value.kind === "directory") keys.push(res.value.name);
-            return step();
-          });
-        }
-        return step();
-      }, function(){ return null; });
-    }).then(function(keys){
-      if (keys === null) return readLegacyMachiningFlagsFile(projectHandle);
-      return Promise.all(keys.map(function(key){
-        return listMachiningFlagsEventsForItem(projectHandle, key).then(foldMachiningFlags);
-      })).then(function(list){ return list.filter(Boolean); });
+      return getMachiningFlagsEventsRootDir(projectHandle, false).then(null, function(err){
+        if (isNotFoundErr(err)) return null;
+        forgetProjectDir(projectHandle, [projectSavesDirName()]);
+        return Promise.reject(readFailedErr("Machining Flags folder", err));
+      });
+    }).then(function(rootH){
+      if (rootH === null) return readLegacyMachiningFlagsFile(projectHandle);
+      return readFoldedEventBranch(projectHandle, rootH, machiningFlagsBranchName(), foldMachiningFlags);
     });
   }
   function findMachiningFlagsRecord(list, level, room, joineryId){
@@ -1949,28 +2375,63 @@
   //      attributed to updatedBy (whoever just completed this last cut) --
   //      forward-only, so this is always safe even if the item somehow
   //      already advanced further by some other means.
-  // Resolves with the (possibly now-unpersisted, if it reverted to fully
-  // Pending) record, for the caller to refresh its own display from.
+  // (2026-09-25, sweep -- v9) Three changes here, none to the on-disk shape:
+  //   1) Runs the legacy machining-flags.json migration check FIRST
+  //      (memoised, so free after the first call per project): the events
+  //      folder must never be brought into existence by a plain cut tap
+  //      while an unmigrated legacy file still sits there -- that folder
+  //      existing is what tells this app the legacy file is history. Before
+  //      this, the tables' own read always ran the migration first, but a
+  //      row painted from the instant snapshot can now be tapped BEFORE the
+  //      background read has finished.
+  //   2) The post-write "is every applicable cut addressed now?" check
+  //      folds the item's events STRICTLY: one mid-sync "revert to pending"
+  //      file silently skipped would have made every cut look addressed and
+  //      advanced the item to "machined" -- on a pipeline that never takes
+  //      it back. If that re-read fails the cut itself is still saved; the
+  //      caller is told the machined check couldn't run and to Refresh.
+  //      The just-written event is folded in even if the folder listing
+  //      hasn't caught up with it yet (an Android/SAF quirk seen in the
+  //      ITP rounds), so the check never misses the tap that triggered it.
+  //   3) Resolves a small result object instead of the bare record --
+  //      { rec, checkFailed, advanced:{status,at,by}|null } -- so the tables
+  //      can patch the tapped row in place (applyCutChangeToRows) instead of
+  //      re-reading the whole project (or, from the Overall table, EVERY
+  //      project) after every single tap.
   function setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, updatedBy){
     if (!projectHandle) return Promise.resolve(null);
     var key = joineryItemPageKey(level, room, joineryId);
     var payload = { cutType: cutType, level: level, room: room || "", joineryId: joineryId || "", state: newState, by: updatedBy || "", at: new Date().toISOString() };
     var stamp = statusEventStamp(new Date(payload.at));
-    return getMachiningFlagsItemDir(projectHandle, key, true).then(function(dirH){
+    return migrateLegacyMachiningFlagsIfNeeded(projectHandle).then(function(){
+      return getMachiningFlagsItemDir(projectHandle, key, true);
+    }).then(function(dirH){
       return dirH.getFileHandle(statusEventFileName(payload.by, stamp, cutType), { create: true });
     }).then(function(fh){
       return fh.createWritable();
     }).then(function(w){
       return w.write(JSON.stringify(payload)).then(function(){ return w.close(); });
     }).then(function(){
-      return listMachiningFlagsEventsForItem(projectHandle, key);
+      return readEventsForItemStrict(getMachiningFlagsItemDir(projectHandle, key, false), "cut events for " + key).then(function(events){
+        var seen = events.some(function(e){ return e && e.cutType === payload.cutType && e.at === payload.at && e.state === payload.state; });
+        return seen ? events : events.concat([payload]);
+      }, function(err){
+        if (isReadFailed(err)) return null; // saved, but the machined check can't be trusted -- see below
+        return Promise.reject(err);
+      });
     }).then(function(events){
+      if (events === null) return { rec: null, checkFailed: true, advanced: null };
       var rec = foldMachiningFlags(events);
       var willAutoAdvance = rec && allCutsAddressed(rec, hasSolidSurface);
-      if (willAutoAdvance){
-        return setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy).then(function(){ return rec; });
-      }
-      return rec;
+      if (!willAutoAdvance) return { rec: rec, checkFailed: false, advanced: null };
+      return setJoineryStatusForwardDetailed(projectHandle, level, room, joineryId, "machined", updatedBy).then(function(r){
+        return { rec: rec, checkFailed: false, advanced: r.written ? { status: r.status, at: r.at, by: r.by } : null, statusNow: r.status };
+      }, function(err){
+        // The cut is saved; only the shared-status advance failed (its own
+        // strict read, or the write). Report it as an unconfirmed check.
+        console.error("Auto-advance to machined failed:", err);
+        return { rec: rec, checkFailed: true, advanced: null };
+      });
     });
   }
   // Shared front door for every cut button (table cells AND the plan-marker
@@ -2005,9 +2466,15 @@
     var newState = currentState === targetState ? "pending" : targetState;
     var editorName = deviceUserName;
     function writeIt(){
-      return setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, editorName).catch(function(err){
+      return setMachiningCutState(projectHandle, level, room, joineryId, hasSolidSurface, cutType, newState, editorName).then(function(result){
+        // (2026-09-25, sweep -- v9) The cut itself is saved; only the
+        // follow-up "is it fully machined now?" check couldn't be trusted
+        // (an event file mid-sync, or the shared status folder unreadable).
+        if (result && result.checkFailed) showToast("Cut saved — but this item's other cuts couldn't be re-read just now (still syncing?), so the Machined check didn't run. Tap Refresh in a moment.", 5000);
+        return result;
+      }).catch(function(err){
         console.error("Recording cut state failed:", err);
-        showToast("Couldn't save this — try again.");
+        showToast(isReadFailed(err) ? "Couldn't save: this project's cut records couldn't be read (still syncing?) — try again in a moment." : "Couldn't save this — try again.");
         return null;
       });
     }
@@ -2026,7 +2493,7 @@
       return writeIt();
     }).catch(function(err){
       console.error("PIN check failed:", err);
-      showToast("Couldn't verify your PIN — try again.");
+      showToast(isReadFailed(err) ? "Couldn't read utzline-users.csv (still syncing?) — nothing was changed. Try again in a moment." : "Couldn't verify your PIN — try again.");
       return null;
     });
   }
@@ -2148,8 +2615,22 @@
 
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
+  // (2026-09-25, sweep -- v9) Coalesced to one attribute write per animation
+  // frame: a finger drag or pinch delivers pointermove events far faster
+  // than the screen can paint, and each one used to touch the DOM
+  // synchronously. The transform the frame paints is always the LATEST
+  // planView, so nothing is lost. planFitToView / setPlanView (tests) call
+  // planApplyTransformNow for a synchronous write where a caller reads the
+  // attribute straight back.
+  var planCanvasWorldG = document.getElementById("planCanvasWorld");
+  var planTransformRaf = 0;
+  function planApplyTransformNow(){
+    planTransformRaf = 0;
+    planCanvasWorldG.setAttribute("transform", "translate(" + planView.tx + " " + planView.ty + ") scale(" + planView.scale + ")");
+  }
   function planApplyTransform(){
-    document.getElementById("planCanvasWorld").setAttribute("transform", "translate(" + planView.tx + " " + planView.ty + ") scale(" + planView.scale + ")");
+    if (planTransformRaf) return;
+    planTransformRaf = requestAnimationFrame(planApplyTransformNow);
   }
   function planFitToView(){
     var w = planCanvasStageWrap.clientWidth, h = planCanvasStageWrap.clientHeight;
@@ -2158,7 +2639,7 @@
     planView.scale = scale;
     planView.tx = (w - planImageW * scale) / 2;
     planView.ty = (h - planImageH * scale) / 2;
-    planApplyTransform();
+    planApplyTransformNow();
   }
   function planClientToWorld(clientX, clientY){
     var r = planCanvasSvg.getBoundingClientRect();
@@ -2360,8 +2841,13 @@
   planZoomOutBtn.addEventListener("click", function(){ planZoomByButton(0.8); });
   planZoomResetBtn.addEventListener("click", function(){ planFitToView(); });
 
+  // (2026-09-25, sweep -- v9) joinery-items.json is read ONCE per plan open
+  // (warmed in openPlanCanvasForLevel) and reused for every marker tap --
+  // it used to be a named lookup + full read on every single tap.
+  var planItemsP = null;
   function planFindItemForMarker(hit){
-    return readJoineryItems(planActiveProjectHandle).then(function(items){
+    if (!planItemsP) planItemsP = readJoineryItems(planActiveProjectHandle);
+    return planItemsP.then(function(items){
       return items.filter(function(it){
         return it.level === planActiveLevelName && it.room === (hit.roomName || "") && it.joineryId === (hit.joineryCode || "");
       })[0] || null;
@@ -2383,14 +2869,17 @@
     if (!hit){ return; }
     planFindItemForMarker(hit).then(function(item){
       if (!item){ showToast((hit.roomName || "") + (hit.joineryCode ? " · " + hit.joineryCode : "") + " — no matching item record found."); return; }
-      openCutStatusModal(planActiveProjectHandle, planActiveProjectName, item, function(){
-        // Re-render the plan markers isn't needed (this app draws no
-        // cut-state on the plan itself) -- but whichever table screen we
-        // came from should reflect the just-written state(s) the moment
-        // the visitor navigates back.
-        if (planReturnScreen === "overall") loadOverallSchedule();
-        else if (planReturnScreen === "projectSchedule") loadProjectSchedule(planActiveProjectHandle, planActiveProjectName);
-      });
+      // Each cut written from the panel is applied to whichever table
+      // screen we came from IN PLACE (applyCutChangeToRows, via
+      // performCutAction) -- no whole-project (or, from the Overall table,
+      // every-project) re-read on close any more (2026-09-25, sweep -- v9).
+      openCutStatusModal(planActiveProjectHandle, planActiveProjectName, item, null);
+    }).catch(function(err){
+      // (2026-09-25, sweep -- v9) Used to be an unhandled rejection with no
+      // feedback when joinery-items.json couldn't be read.
+      console.error("Marker tap failed:", err);
+      planItemsP = null; // so the next tap re-reads rather than reusing a failed read
+      showToast(isReadFailed(err) ? "Couldn't read this project's items (still syncing?) — try again." : "Couldn't open that item's cut status — try again.");
     });
   }
 
@@ -2401,6 +2890,10 @@
     planReturnScreen = returnScreen || "home";
     planCanvasTitle.textContent = projectName + " — " + levelName;
     planCanvasScreen.hidden = false;
+    hideStatusHistoryPop();
+    navRecord("planCanvas"); // device Back button (2026-09-25, sweep -- v9) -- see navRecord
+    planItemsP = readJoineryItems(projectHandle); // warm, once per plan open -- see planFindItemForMarker
+    planItemsP.catch(function(){}); // surfaced on tap, not here
     return readLevelFile(projectHandle, projectName, levelName).then(function(level){
       // Same roomlink filter every ITP app already applies (type==="roomlink",
       // not hidden, a real roomName) -- this app's own reader used to pass
@@ -2430,15 +2923,28 @@
       }
     }).catch(function(err){
       console.error("Opening level plan failed:", err);
-      showToast("Couldn't open this level's plan.");
+      // "Unreadable is not empty" (2026-09-25, sweep -- v9): a level file
+      // that exists but couldn't be read (mid-sync) says so, instead of the
+      // old "No saved plan found" for a plan that's really there.
+      showToast(isReadFailed(err) ? "Couldn't read this level's plan (it may still be syncing) — try again." : "Couldn't open this level's plan.");
     });
   }
-  backFromPlanCanvasBtn.addEventListener("click", function(){
+  function closePlanCanvas(){
     planCanvasScreen.hidden = true;
     planSaved = null;
+    planItemsP = null;
     if (planReturnScreen === "overall") showScreen("overall");
     else if (planReturnScreen === "projectSchedule") showScreen("projectSchedule");
     else showScreen("home");
+  }
+  backFromPlanCanvasBtn.addEventListener("click", closePlanCanvas);
+  // (2026-09-25, sweep -- v9) Android: while the plan is open, a long press
+  // anywhere on it (this app's own open-cut-status gesture) must never pop
+  // the browser's image/text context sheet -- the SVG's own contextmenu
+  // handler above already covers the drawing, this covers the rest of the
+  // screen (title bar, hint strip).
+  document.addEventListener("contextmenu", function(e){
+    if (!planCanvasScreen.hidden) e.preventDefault();
   });
 
   /* ============================== Cut status panel (plan marker tap) ==============================
@@ -2467,44 +2973,73 @@
   var cutStatusModalError = document.getElementById("cutStatusModalError");
   var cutStatusModalBody = document.getElementById("cutStatusModalBody");
   var cutStatusCloseBtn = document.getElementById("cutStatusCloseBtn");
-  var cutStatusCtx = null; // { projectHandle, projectName, item, onDone }
+  var cutStatusCtx = null; // { projectHandle, projectName, item, onDone, rec, busy }
 
   function itemLabel(projectName, item){
     return (projectName ? projectName + " — " : "") + item.level + " / " + item.room + (item.joineryId ? " / " + item.joineryId : "") + (item.workOrderNo ? " (WO " + item.workOrderNo + ")" : "");
   }
   var CUT_TYPE_LABELS = [["carcase", "Carcase cut"], ["colourBoard", "Colour board cut"], ["solidSurface", "Solid Surface cut"]];
-  function renderCutStatusModalBody(){
-    if (!cutStatusCtx) return Promise.resolve();
+  function paintCutStatusModalBody(rec){
     var ctx = cutStatusCtx;
+    if (!ctx) return;
     var hasSolidSurface = ctx.item && ctx.item.hasSolidSurface === true;
-    return readMachiningFlags(ctx.projectHandle).then(function(list){
-      var rec = findMachiningFlagsRecord(list, ctx.item.level, ctx.item.room, ctx.item.joineryId);
-      var rowLike = { machiningRec: rec, hasSolidSurface: hasSolidSurface };
-      cutStatusModalBody.innerHTML = CUT_TYPE_LABELS.filter(function(pair){
-        return pair[0] !== "solidSurface" || hasSolidSurface;
-      }).map(function(pair){
-        return "<div class=\"cut-modal-row\"><div class=\"cut-modal-label\">" + escapeHtml(pair[1]) + "</div>" + cutCellHtml(rowLike, pair[0], hasSolidSurface) + "</div>";
-      }).join("");
-      Array.prototype.forEach.call(cutStatusModalBody.querySelectorAll(".cut-btn"), function(btn){
-        btn.addEventListener("click", function(){
-          onCutStatusModalButtonClick(btn.getAttribute("data-cut"), btn.getAttribute("data-target-state"));
-        });
+    ctx.rec = rec;
+    var rowLike = { machiningRec: rec, hasSolidSurface: hasSolidSurface };
+    cutStatusModalBody.innerHTML = CUT_TYPE_LABELS.filter(function(pair){
+      return pair[0] !== "solidSurface" || hasSolidSurface;
+    }).map(function(pair){
+      return "<div class=\"cut-modal-row\"><div class=\"cut-modal-label\">" + escapeHtml(pair[1]) + "</div>" + cutCellHtml(rowLike, pair[0], hasSolidSurface) + "</div>";
+    }).join("");
+    Array.prototype.forEach.call(cutStatusModalBody.querySelectorAll(".cut-btn"), function(btn){
+      btn.addEventListener("click", function(){
+        onCutStatusModalButtonClick(btn.getAttribute("data-cut"), btn.getAttribute("data-target-state"));
       });
     });
   }
+  // (2026-09-25, sweep -- v9) Reads ONE item's own cut events, strictly
+  // (readMachiningFlagsRecordForItem) -- this used to fold EVERY item in the
+  // whole project to show one, on every open AND again on every button
+  // press inside the panel. A read_failed (an event file mid-sync) shows a
+  // "couldn't read, try again" note instead of a panel that quietly shows
+  // the item one cut behind and lets you write on top of it.
+  function renderCutStatusModalBody(){
+    if (!cutStatusCtx) return Promise.resolve();
+    var ctx = cutStatusCtx;
+    cutStatusModalBody.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Reading this item's cuts…</p>";
+    return readMachiningFlagsRecordForItem(ctx.projectHandle, ctx.item.level, ctx.item.room, ctx.item.joineryId).then(function(rec){
+      if (cutStatusCtx !== ctx) return;
+      paintCutStatusModalBody(rec);
+    }).catch(function(err){
+      if (cutStatusCtx !== ctx) return;
+      console.error("Reading this item's cuts failed:", err);
+      cutStatusModalBody.innerHTML = "";
+      cutStatusModalError.hidden = false;
+      cutStatusModalError.textContent = isReadFailed(err) ? "Couldn't read this item's cut records (still syncing?) -- close and try again in a moment." : "Couldn't read this item's cut records -- close and try again.";
+    });
+  }
   function onCutStatusModalButtonClick(cutType, targetState){
-    if (!cutStatusCtx) return;
+    if (!cutStatusCtx || cutStatusCtx.busy) return;
     var ctx = cutStatusCtx;
     var hasSolidSurface = ctx.item && ctx.item.hasSolidSurface === true;
     cutStatusModalError.hidden = true;
-    readMachiningFlags(ctx.projectHandle).then(function(list){
-      var rec = findMachiningFlagsRecord(list, ctx.item.level, ctx.item.room, ctx.item.joineryId);
-      var currentState = cutStateFor(rec, cutType);
-      return performCutAction(ctx.projectHandle, ctx.item.level, ctx.item.room, ctx.item.joineryId, hasSolidSurface, cutType, currentState, targetState);
-    }).then(function(){
-      return renderCutStatusModalBody();
+    // Current state comes from the record this panel is SHOWING (strictly
+    // read when it opened, then updated from each write's own result) --
+    // the tap toggles relative to what the machinist sees.
+    var currentState = cutStateFor(ctx.rec, cutType);
+    ctx.busy = true;
+    Array.prototype.forEach.call(cutStatusModalBody.querySelectorAll(".cut-btn"), function(b){ b.disabled = true; });
+    performCutAction(ctx.projectHandle, ctx.item.level, ctx.item.room, ctx.item.joineryId, hasSolidSurface, cutType, currentState, targetState).then(function(result){
+      if (cutStatusCtx !== ctx) return;
+      ctx.busy = false;
+      if (result === null){ paintCutStatusModalBody(ctx.rec); return; } // blocked/cancelled/errored -- already toasted; re-enable as it was
+      applyCutChangeToRows(ctx.projectName, ctx.item, result);
+      if (result.checkFailed) return renderCutStatusModalBody(); // the write's own fold wasn't trustworthy -- re-read strictly
+      paintCutStatusModalBody(result.rec);
     }).catch(function(err){
+      if (cutStatusCtx !== ctx) return;
+      ctx.busy = false;
       console.error("Recording cut state failed:", err);
+      paintCutStatusModalBody(ctx.rec);
       cutStatusModalError.hidden = false;
       cutStatusModalError.textContent = "Couldn't save this -- try again.";
     });
@@ -2514,7 +3049,7 @@
       showToast("Set your name first (top of the Home screen) before recording a cut.");
       return;
     }
-    cutStatusCtx = { projectHandle: projectHandle, projectName: projectName, item: item, onDone: onDone };
+    cutStatusCtx = { projectHandle: projectHandle, projectName: projectName, item: item, onDone: onDone, rec: null, busy: false };
     cutStatusModalTitle.textContent = "Cut status";
     cutStatusModalSub.textContent = itemLabel(projectName, item);
     cutStatusModalError.hidden = true;
@@ -3091,12 +3626,12 @@
       numberpadDotsEl.appendChild(dot);
     }
   }
-  function numberpadShakeAndClear(){
+  function numberpadShakeAndClear(message){
     var box = numberpadBackdrop.querySelector(".modal");
     box.classList.remove("numberpad-shake");
     void box.offsetWidth; // restart the CSS animation
     box.classList.add("numberpad-shake");
-    showToast("Incorrect PIN — try again.");
+    showToast(message || "Incorrect PIN — try again.");
     setTimeout(function(){
       if (numberpadState){ numberpadState.entered = ""; numberpadState.busy = false; renderNumberpadDots(); }
     }, 260);
@@ -3125,8 +3660,10 @@
         if (!numberpadState) return; // cancelled while verifying
         if (ok) finishNumberpad(pin);
         else numberpadShakeAndClear();
-      }, function(){
-        if (numberpadState) numberpadShakeAndClear();
+      }, function(err){
+        // (2026-09-25, sweep -- v9) A verify that couldn't READ the registry
+        // is not a wrong PIN -- say what actually happened.
+        if (numberpadState) numberpadShakeAndClear(isReadFailed(err) ? "Couldn't read utzline-users.csv (still syncing?) — try again." : undefined);
       });
     }
   }
@@ -3313,8 +3850,12 @@
         });
       });
     }).catch(function(err){
+      // (2026-09-25, sweep -- v9) readUsersCsv now REJECTS when the registry
+      // exists but can't be read (mid-sync) instead of reading as empty --
+      // so this flow never gets as far as writeUsersCsv with a list that's
+      // missing everyone else's row. Say so plainly; nothing was written.
       console.error("Adding a new name/PIN failed:", err);
-      showToast("Couldn't save that to utzline-users.csv.");
+      showToast(isReadFailed(err) ? "Couldn't read utzline-users.csv (still syncing?) — nothing was changed. Try again in a moment." : "Couldn't save that to utzline-users.csv.");
       revertIdentitySelector(previousValue);
     });
   }
@@ -3359,6 +3900,58 @@
         rawItem: item
       };
     });
+  }
+  /* ---- Snapshot (de)hydration + lazy project handles (2026-09-25, sweep -- v9) ----
+     A row is stored in the device-local snapshot WITHOUT its projectHandle
+     (a directory handle is the one non-plain thing on it), and on paint
+     gets it back lazily the moment an action needs it --
+     ensureRowProjectHandle, one memoised named lookup per project.
+     Everything else on a row is plain data computed from the files, so a
+     snapshot row renders exactly as the live one did. */
+  function rowToSnapshot(row){
+    var o = {};
+    Object.keys(row).forEach(function(k){ if (k !== "projectHandle") o[k] = row[k]; });
+    return o;
+  }
+  function rowsFromSnapshot(list){
+    return (Array.isArray(list) ? list : []).map(function(o){ var r = Object.assign({}, o); r.projectHandle = null; return r; });
+  }
+  function ensureRowProjectHandle(row){
+    if (row.projectHandle) return Promise.resolve(row.projectHandle);
+    return getProjectHandleByName(row.project).then(function(h){ row.projectHandle = h; return h; });
+  }
+  // After a cut write the folded result is known exactly (setMachiningCutState
+  // resolves the record the event just produced, plus whether it advanced
+  // the shared status) -- update the matching row in whichever tables hold
+  // it, repaint, and re-save their snapshots. Zero folder reads, where a
+  // tap used to re-read the whole project (or, from the Overall Machine
+  // Schedule, EVERY project) before the table caught up -- on Andrew's
+  // tablet that was the several-second freeze after every single tap.
+  // A result whose post-write check failed (checkFailed) carries no
+  // trustworthy record, so the row is left as it was; the toast already
+  // told the person to Refresh.
+  function applyCutChangeToRows(projectName, item, result){
+    if (!result || result.checkFailed) return;
+    function patch(row){
+      if (row.project !== projectName || row.level !== item.level || (row.room || "") !== (item.room || "") || (row.joineryId || "") !== (item.joineryId || "")) return false;
+      row.machiningRec = result.rec;
+      if (result.advanced){
+        row.statusKey = result.advanced.status;
+        row.statusHistory = [{ status: result.advanced.status, at: result.advanced.at, by: result.advanced.by }].concat(row.statusHistory || []);
+        if (result.advanced.status === "machined"){ row.machinedDone = true; row.machinedBy = result.advanced.by; row.machinedAt = result.advanced.at; }
+      } else if (result.statusNow && joineryStatusRank(result.statusNow) > joineryStatusRank(row.statusKey)){
+        // The strict fold saw the item already further along than this row
+        // knew (another app moved it since the last read) -- show that.
+        row.statusKey = result.statusNow;
+        if (joineryStatusRank(result.statusNow) >= 3) row.machinedDone = true;
+      }
+      return true;
+    }
+    var touchedOverall = false, touchedProj = false;
+    overallAllRows.forEach(function(row){ if (patch(row)) touchedOverall = true; });
+    projAllRows.forEach(function(row){ if (patch(row)) touchedProj = true; });
+    if (touchedOverall){ renderOverallTable(); snapSet("overall", null, { projects: overallProjectNames, rows: overallAllRows.map(rowToSnapshot) }); }
+    if (touchedProj){ renderProjTable(); snapSet("project", activeProjectName, { rows: projAllRows.map(rowToSnapshot), planLevels: projPlanLevels }); }
   }
   function scheduleCompare(a, b, sort){
     var col = sort.col;
@@ -3442,37 +4035,57 @@
   }
   function wireRowActions(tr, row, returnScreen){
     var openItemBtn = tr.querySelector(".open-item-btn");
+    var jobNoteBtn = tr.querySelector(".job-note-btn");
+    var viewBtn = tr.querySelector(".view-plan-btn");
+    // Every action first makes sure the row has its project directory
+    // handle (instant, unless this row was painted from a snapshot -- then
+    // one memoised lookup, see ensureRowProjectHandle). (2026-09-25, sweep
+    // -- v9) A lookup that fails now reports instead of rejecting silently.
+    function withHandle(fn){
+      return ensureRowProjectHandle(row).then(fn).catch(function(err){
+        console.error("Row action failed:", err);
+        showToast("Couldn't open that project's folder — tap Refresh and try again.");
+      });
+    }
     openItemBtn.addEventListener("click", function(){
-      openJoineryItemPage(row, returnScreen);
+      withHandle(function(){ openJoineryItemPage(row, returnScreen); });
     });
     // Only rendered at all when row.jobNote is true (see scheduleRowCells
     // above) -- no dead-end "no notes yet" dialog on a row that never had
     // one.
-    var jobNoteBtn = tr.querySelector(".job-note-btn");
     if (jobNoteBtn){
       jobNoteBtn.addEventListener("click", function(){
-        openJobNoteViewDialog(row.projectHandle, row.level, row.room, row.joineryId);
+        withHandle(function(h){ openJobNoteViewDialog(h, row.level, row.room, row.joineryId); });
       });
     }
-    var viewBtn = tr.querySelector(".view-plan-btn");
     viewBtn.addEventListener("click", function(){
-      openPlanCanvasForLevel(row.projectHandle, row.project, row.level, returnScreen);
+      withHandle(function(h){ return openPlanCanvasForLevel(h, row.project, row.level, returnScreen); });
     });
     // Each cut's Done/N/A button pair -- same performCutAction front door
-    // the plan-marker cut status panel uses, so "requires sign-in" and
-    // "tap the active button to revert to Pending" behave identically in
-    // both places. A full reload of whichever schedule screen we're on
-    // (rather than a targeted in-place DOM patch) keeps this in lockstep
-    // with the Status column, which can itself change the moment this cut
-    // completes the last applicable one (auto-advance to "machined").
+    // the plan-marker cut status panel uses, so "requires sign-in", "tap
+    // the active button to revert to Pending" and the PIN lockout behave
+    // identically in both places. (2026-09-25, sweep -- v9) The written
+    // result is applied to the row IN PLACE (applyCutChangeToRows --
+    // including the Status column's auto-advance to "machined", which the
+    // write reports back) instead of re-reading the whole schedule; both
+    // buttons of the cut are disabled while its write is in flight so a
+    // double tap can't file two events.
     Array.prototype.forEach.call(tr.querySelectorAll(".cut-btn"), function(btn){
       btn.addEventListener("click", function(){
         var cutType = btn.getAttribute("data-cut");
         var targetState = btn.getAttribute("data-target-state");
         var currentState = cutStateFor(row.machiningRec, cutType);
-        performCutAction(row.projectHandle, row.level, row.room, row.joineryId, row.hasSolidSurface, cutType, currentState, targetState).then(function(result){
-          if (result === null) return; // blocked (no sign-in) or errored -- already toasted
-          if (returnScreen === "overall") loadOverallSchedule(); else loadProjectSchedule(row.projectHandle, row.project);
+        var group = btn.closest(".cut-group");
+        var groupBtns = group ? Array.prototype.slice.call(group.querySelectorAll(".cut-btn")) : [btn];
+        if (groupBtns.some(function(b){ return b.disabled; })) return;
+        groupBtns.forEach(function(b){ b.disabled = true; });
+        withHandle(function(h){
+          return performCutAction(h, row.level, row.room, row.joineryId, row.hasSolidSurface, cutType, currentState, targetState).then(function(result){
+            if (result === null) return; // blocked (no sign-in) / cancelled / errored -- already toasted
+            applyCutChangeToRows(row.project, row, result);
+          });
+        }).then(function(){
+          groupBtns.forEach(function(b){ b.disabled = false; }); // no-op if the row was re-rendered; harmless
         });
       });
     });
@@ -3503,6 +4116,7 @@
   var overallMachinedFilter = document.getElementById("overallMachinedFilter");
   var overallSearchInput = document.getElementById("overallSearchInput");
   var overallAllRows = [];
+  var overallProjectNames = []; // every project under the root as of the last successful read (the project filter's options; saved with the snapshot)
   var overallSort = { col: "level", dir: "asc" };
 
   function statusFilterMatches(filterValue, statusKey){
@@ -3510,14 +4124,61 @@
     if (filterValue === "__created__") return statusKey === "";
     return statusKey === filterValue;
   }
+  /* ---- Filter tick boxes (2026-09-26, v9 addendum) ----
+     Andrew, verbatim, mid-sweep: "add in tick boxes for filtering out
+     installed and delivered items. Also machining filter out machined with
+     a tickbox". Three per table here (both tables list every item whatever
+     its stage, so delivered/installed rows do appear): "Hide machined"
+     hides a row whose item is fully machined -- row.machinedDone, the exact
+     signal the "Fully machined" filter and the item page's badge already
+     use (status at Machined or beyond); "Hide delivered" / "Hide installed"
+     hide a row whose current folded status is exactly that stage (installed
+     outranks delivered, so each box is its own stage; both ticked hides
+     both). Default UNTICKED; remembered per device in localStorage, one key
+     per app+table+box, so it sticks between visits. Filtering happens on
+     the rows already in memory (renderOverallTable/renderProjTable) --
+     never a re-read from disk -- and the search box / selects still apply
+     on top. The count line under each bar follows what's visible.
+     localStorage is a convenience only: every access is wrapped, and a
+     browser that refuses it just starts unticked. */
+  var HIDE_TICK_STORAGE_PREFIX = "utzline-machine-schedule.";
+  function tickStorageGet(key){ try{ return localStorage.getItem(HIDE_TICK_STORAGE_PREFIX + key) === "1"; }catch(e){ return false; } }
+  function tickStorageSet(key, on){ try{ localStorage.setItem(HIDE_TICK_STORAGE_PREFIX + key, on ? "1" : "0"); }catch(e){} }
+  // Wires one tick box: restores its remembered state, then re-renders and
+  // remembers on every change. Returns the input for the predicate to read.
+  function wireHideTickBox(id, storageKey, rerender){
+    var el = document.getElementById(id);
+    el.checked = tickStorageGet(storageKey);
+    el.addEventListener("change", function(){ tickStorageSet(storageKey, el.checked); rerender(); });
+    return el;
+  }
+  function hideTickBoxesMatch(ticks, row){
+    if (ticks.machined.checked && row.machinedDone) return false;
+    if (ticks.delivered.checked && row.statusKey === "delivered") return false;
+    if (ticks.installed.checked && row.statusKey === "installed") return false;
+    return true;
+  }
+  function updateCountLine(el, shown, total){
+    el.hidden = total === 0;
+    el.textContent = shown === total
+      ? "Showing all " + total + (total === 1 ? " item" : " items")
+      : "Showing " + shown + " of " + total + " items";
+  }
   function machinedFilterMatches(filterValue, machinedDone){
     if (filterValue === "") return true;
     return filterValue === "yes" ? machinedDone : !machinedDone;
   }
+  var overallCountLine = document.getElementById("overallCountLine");
+  var overallHideTicks = {
+    machined: wireHideTickBox("overallHideMachined", "overall.hideMachined", function(){ renderOverallTable(); }),
+    delivered: wireHideTickBox("overallHideDelivered", "overall.hideDelivered", function(){ renderOverallTable(); }),
+    installed: wireHideTickBox("overallHideInstalled", "overall.hideInstalled", function(){ renderOverallTable(); })
+  };
   function overallMatchesFilters(row){
     if (overallProjectFilter.value && row.project !== overallProjectFilter.value) return false;
     if (!statusFilterMatches(overallStatusFilter.value, row.statusKey)) return false;
     if (!machinedFilterMatches(overallMachinedFilter.value, row.machinedDone)) return false;
+    if (!hideTickBoxesMatch(overallHideTicks, row)) return false;
     var q = overallSearchInput.value.trim().toLowerCase();
     if (q){
       var hay = ((row.joineryId || "") + " " + (row.workOrderNo || "") + " " + (row.project || "")).toLowerCase();
@@ -3525,7 +4186,15 @@
     }
     return true;
   }
+  // (2026-09-25, sweep -- v9) A search box re-rendered the whole table on
+  // every keystroke -- hundreds of rows rebuilt per character on the Overall
+  // Machine Schedule. Coalesced to one render shortly after typing pauses.
+  function debounce(fn, ms){
+    var t = 0;
+    return function(){ clearTimeout(t); t = setTimeout(fn, ms); };
+  }
   function renderOverallTable(){
+    hideStatusHistoryPop(); // the cell it was anchored to is about to be rebuilt (2026-09-25, sweep -- v9)
     var filtered = overallAllRows.filter(overallMatchesFilters);
     filtered.sort(function(a, b){ return scheduleCompare(a, b, overallSort); });
     overallTableBody.innerHTML = "";
@@ -3538,6 +4207,7 @@
     overallEmptyAll.hidden = overallAllRows.length !== 0;
     overallEmpty.hidden = !(overallAllRows.length > 0 && filtered.length === 0);
     overallTable.hidden = overallAllRows.length === 0;
+    updateCountLine(overallCountLine, filtered.length, overallAllRows.length);
     Array.prototype.forEach.call(overallTable.querySelectorAll("th"), function(th){
       th.classList.remove("sorted", "desc");
       if (th.getAttribute("data-col") === overallSort.col){
@@ -3556,41 +4226,95 @@
     });
   });
   [overallProjectFilter, overallStatusFilter, overallMachinedFilter].forEach(function(el){ el.addEventListener("change", renderOverallTable); });
-  overallSearchInput.addEventListener("input", renderOverallTable);
-  document.getElementById("refreshOverallBtn").addEventListener("click", loadOverallSchedule);
+  overallSearchInput.addEventListener("input", debounce(renderOverallTable, 100));
+  document.getElementById("refreshOverallBtn").addEventListener("click", function(){ loadOverallSchedule(); });
 
-  // Reads EVERY project under the chosen root, sequentially -- a simple,
-  // known-scalable-enough-for-V1 design given how this family already
-  // reads its data (no project count in this ecosystem has ever needed
-  // more than that so far).
+  var overallRefreshNote = document.getElementById("overallRefreshNote");
+  var overallLoadSeq = 0;
+  function setOverallProjectFilterOptions(names){
+    overallProjectNames = names.slice();
+    var keep = overallProjectFilter.value;
+    overallProjectFilter.innerHTML = "<option value=\"\">All projects</option>" + names.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
+    if (keep && names.indexOf(keep) !== -1) overallProjectFilter.value = keep;
+  }
+  // Reads EVERY project under the chosen root. (2026-09-25, sweep -- v9; speed)
+  //   - Paints the last-known rows from the device-local snapshot FIRST
+  //     (instantly, with a "refreshing…" note) whenever there is one, so
+  //     the machinist is never staring at "Reading every project..." for
+  //     something they saw a minute ago; the loading card only shows on a
+  //     genuinely first visit.
+  //   - Projects are read in PARALLEL (Promise.all) instead of one after
+  //     another in a reduce chain; each project's own three reads were
+  //     already parallel; the project handle comes from the memoised
+  //     per-name cache.
+  //   - Per-project failures are no longer silently swallowed: a project
+  //     that couldn't be read keeps its last-known rows (if any) and is
+  //     NAMED in a toast, so "unreadable" never quietly reads as "no items"
+  //     ("unreadable is not empty").
+  //   - A stale response (Refresh pressed again, or left and came back,
+  //     before the previous read finished) is dropped via overallLoadSeq.
   function loadOverallSchedule(){
-    overallTableCard.hidden = true;
-    overallLoadingCard.hidden = false;
-    return listExistingProjects(projectsRootHandle).then(function(names){
-      overallProjectFilter.innerHTML = "<option value=\"\">All projects</option>" + names.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
-      return names.reduce(function(chain, name){
-        return chain.then(function(acc){
-          return projectsRootHandle.getDirectoryHandle(name, { create: false }).then(function(projectHandle){
-            return Promise.all([
-              readJoineryItems(projectHandle),
-              readJoineryStatuses(projectHandle),
-              readMachiningFlags(projectHandle)
-            ]).then(function(res){
-              var rows = buildEnrichedRows(res[0], res[1], res[2], name, projectHandle);
-              return acc.concat(rows);
-            });
-          }).catch(function(){ return acc; });
-        });
-      }, Promise.resolve([]));
-    }).then(function(rows){
-      overallAllRows = rows;
+    var seq = ++overallLoadSeq;
+    var painted = overallAllRows.length > 0;
+    if (!painted){
+      overallTableCard.hidden = true;
+      overallLoadingCard.hidden = false;
+    }
+    overallRefreshNote.hidden = !painted;
+    var snapP = painted ? Promise.resolve(null) : snapGet("overall", null).then(function(snap){
+      if (seq !== overallLoadSeq || !snap || !Array.isArray(snap.rows) || !snap.rows.length) return;
+      overallAllRows = rowsFromSnapshot(snap.rows);
+      setOverallProjectFilterOptions(snap.projects || []);
       overallLoadingCard.hidden = true;
       overallTableCard.hidden = false;
+      overallRefreshNote.hidden = false;
       renderOverallTable();
+    });
+    return snapP.then(function(){
+      return listExistingProjects(projectsRootHandle);
+    }).then(function(names){
+      return Promise.all(names.map(function(name){
+        return getProjectHandleByName(name).then(function(projectHandle){
+          return Promise.all([
+            readJoineryItems(projectHandle),
+            readJoineryStatuses(projectHandle),
+            readMachiningFlags(projectHandle)
+          ]).then(function(res){
+            return { name: name, rows: buildEnrichedRows(res[0], res[1], res[2], name, projectHandle) };
+          });
+        }).catch(function(err){
+          console.error("Reading project \"" + name + "\" for the Overall Machine Schedule failed:", err);
+          return { name: name, failed: true };
+        });
+      })).then(function(results){
+        if (seq !== overallLoadSeq) return; // superseded by a newer load
+        var previous = overallAllRows; // whatever is on screen (snapshot or last read)
+        var rows = [], failed = [];
+        results.forEach(function(r){
+          if (r.failed){
+            failed.push(r.name);
+            previous.forEach(function(row){ if (row.project === r.name) rows.push(row); }); // keep last-known rows for it
+          } else {
+            rows = rows.concat(r.rows);
+          }
+        });
+        overallAllRows = rows;
+        setOverallProjectFilterOptions(names);
+        overallLoadingCard.hidden = true;
+        overallTableCard.hidden = false;
+        overallRefreshNote.hidden = true;
+        renderOverallTable();
+        snapSet("overall", null, { projects: names, rows: rows.map(rowToSnapshot) });
+        if (failed.length){
+          showToast("Couldn't read " + (failed.length === 1 ? "project " : "projects ") + failed.join(", ") + " (still syncing?) — showing last-known rows. Tap Refresh to try again.", 5000);
+        }
+      });
     }).catch(function(err){
+      if (seq !== overallLoadSeq) return;
       console.error("Loading overall machine schedule failed:", err);
       overallLoadingCard.hidden = true;
       overallTableCard.hidden = false;
+      overallRefreshNote.hidden = true;
       showToast("Couldn't read every project's items.");
     });
   }
@@ -3608,14 +4332,24 @@
   var levelPlanSelect = document.getElementById("levelPlanSelect");
   var openLevelPlanBtn = document.getElementById("openLevelPlanBtn");
   var levelPlanRow = document.getElementById("levelPlanRow");
+  var projRefreshNote = document.getElementById("projRefreshNote");
   var projAllRows = [];
+  var projPlanLevels = [];
   var projSort = { col: "level", dir: "asc" };
   var activeProjectHandle = null, activeProjectName = "";
+  var projLoadSeq = 0;
 
+  var projCountLine = document.getElementById("projCountLine");
+  var projHideTicks = {
+    machined: wireHideTickBox("projHideMachined", "project.hideMachined", function(){ renderProjTable(); }),
+    delivered: wireHideTickBox("projHideDelivered", "project.hideDelivered", function(){ renderProjTable(); }),
+    installed: wireHideTickBox("projHideInstalled", "project.hideInstalled", function(){ renderProjTable(); })
+  };
   function projMatchesFilters(row){
     if (projLevelFilter.value && row.level !== projLevelFilter.value) return false;
     if (!statusFilterMatches(projStatusFilter.value, row.statusKey)) return false;
     if (!machinedFilterMatches(projMachinedFilter.value, row.machinedDone)) return false;
+    if (!hideTickBoxesMatch(projHideTicks, row)) return false;
     var q = projSearchInput.value.trim().toLowerCase();
     if (q){
       var hay = ((row.joineryId || "") + " " + (row.workOrderNo || "")).toLowerCase();
@@ -3624,6 +4358,8 @@
     return true;
   }
   function renderProjTable(){
+    hideStatusHistoryPop(); // the cell it was anchored to is about to be rebuilt (2026-09-25, sweep -- v9)
+    projEmpty.textContent = "No items match these filters."; // loadProjectSchedule borrows this element for its read-failure message
     var filtered = projAllRows.filter(projMatchesFilters);
     filtered.sort(function(a, b){ return scheduleCompare(a, b, projSort); });
     projTableBody.innerHTML = "";
@@ -3636,6 +4372,7 @@
     projEmptyAll.hidden = projAllRows.length !== 0;
     projEmpty.hidden = !(projAllRows.length > 0 && filtered.length === 0);
     projTable.hidden = projAllRows.length === 0;
+    updateCountLine(projCountLine, filtered.length, projAllRows.length);
     Array.prototype.forEach.call(projTable.querySelectorAll("th"), function(th){
       th.classList.remove("sorted", "desc");
       if (th.getAttribute("data-col") === projSort.col){
@@ -3654,33 +4391,89 @@
     });
   });
   [projLevelFilter, projStatusFilter, projMachinedFilter].forEach(function(el){ el.addEventListener("change", renderProjTable); });
-  projSearchInput.addEventListener("input", renderProjTable);
+  projSearchInput.addEventListener("input", debounce(renderProjTable, 100));
+  document.getElementById("refreshProjectBtn").addEventListener("click", function(){
+    if (activeProjectHandle) loadProjectSchedule(activeProjectHandle, activeProjectName);
+  });
   openLevelPlanBtn.addEventListener("click", function(){
     if (!levelPlanSelect.value) { showToast("No levels with a saved plan found for this project yet."); return; }
     openPlanCanvasForLevel(activeProjectHandle, activeProjectName, levelPlanSelect.value, "projectSchedule");
   });
 
+  function applyProjectScheduleState(rows, planLevels){
+    projAllRows = rows;
+    projPlanLevels = planLevels || [];
+    var levelNamesFromItems = Array.from(new Set(rows.map(function(r){ return r.level; }))).sort(function(a, b){ return a.localeCompare(b, undefined, { sensitivity: "base" }); });
+    var keepLevel = projLevelFilter.value;
+    projLevelFilter.innerHTML = "<option value=\"\">All levels</option>" + levelNamesFromItems.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
+    if (keepLevel && levelNamesFromItems.indexOf(keepLevel) !== -1) projLevelFilter.value = keepLevel;
+    var keepPlan = levelPlanSelect.value;
+    levelPlanSelect.innerHTML = projPlanLevels.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
+    if (keepPlan && projPlanLevels.indexOf(keepPlan) !== -1) levelPlanSelect.value = keepPlan;
+    levelPlanRow.hidden = projPlanLevels.length === 0;
+    renderProjTable();
+  }
+  // (2026-09-25, sweep -- v9; speed + a stale-state bug) Opening a project
+  // used to leave the PREVIOUS project's rows on screen (and its plan
+  // levels in the picker) until this project's reads finished -- a real
+  // "stale state after navigation" on a slow tablet, where a machinist
+  // could tap a cut button on a row that belonged to the project they just
+  // left. Now: on a project change the table is cleared at once, this
+  // project's last-known snapshot is painted instantly (rows + plan levels,
+  // "refreshing…" note), the folder is read behind it, and the result
+  // repaints and re-saves the snapshot. A read that fails keeps whatever's
+  // painted and says so -- never "No joinery items in this project yet."
+  // for a folder that just couldn't be read right now. Same superseded-load
+  // guard as the Overall Machine Schedule.
   function loadProjectSchedule(projectHandle, projectName){
+    var seq = ++projLoadSeq;
+    var changed = projectName !== activeProjectName;
     activeProjectHandle = projectHandle;
     activeProjectName = projectName;
     projectScheduleTitle.textContent = projectName;
-    return Promise.all([
-      readJoineryItems(projectHandle),
-      readJoineryStatuses(projectHandle),
-      listExistingLevels(projectHandle),
-      readMachiningFlags(projectHandle)
-    ]).then(function(res){
+    if (changed){
+      projAllRows = []; projPlanLevels = [];
+      projTableBody.innerHTML = "";
+      projEmpty.hidden = true; projEmptyAll.hidden = true; projCountLine.hidden = true;
+      levelPlanRow.hidden = true;
+      projLevelFilter.value = ""; levelPlanSelect.innerHTML = "";
+    }
+    var painted = projAllRows.length > 0;
+    projRefreshNote.textContent = painted ? "Showing last-known cut status — refreshing from the folder…" : "Reading this project…";
+    projRefreshNote.hidden = false;
+    var snapP = painted ? Promise.resolve() : snapGet("project", projectName).then(function(snap){
+      if (seq !== projLoadSeq || !snap || !Array.isArray(snap.rows) || !snap.rows.length) return;
+      applyProjectScheduleState(rowsFromSnapshot(snap.rows), snap.planLevels || []);
+      projRefreshNote.textContent = "Showing last-known cut status — refreshing from the folder…";
+    });
+    return snapP.then(function(){
+      return Promise.all([
+        readJoineryItems(projectHandle),
+        readJoineryStatuses(projectHandle),
+        listExistingLevels(projectHandle),
+        readMachiningFlags(projectHandle)
+      ]);
+    }).then(function(res){
+      if (seq !== projLoadSeq) return; // superseded
       var rows = buildEnrichedRows(res[0], res[1], res[3], projectName, projectHandle);
-      projAllRows = rows;
-      var levelNamesFromItems = Array.from(new Set(rows.map(function(r){ return r.level; }))).sort(function(a, b){ return a.localeCompare(b, undefined, { sensitivity: "base" }); });
-      projLevelFilter.innerHTML = "<option value=\"\">All levels</option>" + levelNamesFromItems.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
-      var planLevels = res[2];
-      levelPlanSelect.innerHTML = planLevels.map(function(n){ return "<option value=\"" + escapeHtml(n) + "\">" + escapeHtml(n) + "</option>"; }).join("");
-      levelPlanRow.hidden = planLevels.length === 0;
-      renderProjTable();
+      applyProjectScheduleState(rows, res[2]);
+      projRefreshNote.hidden = true;
+      snapSet("project", projectName, { rows: rows.map(rowToSnapshot), planLevels: res[2] });
     }).catch(function(err){
+      if (seq !== projLoadSeq) return;
       console.error("Loading project machine schedule failed:", err);
-      showToast("Couldn't read this project's items.");
+      projRefreshNote.hidden = true;
+      if (!projAllRows.length){
+        // Nothing painted -- say why the table is empty instead of leaving
+        // it blank or claiming there are no items.
+        projTableBody.innerHTML = "";
+        projTable.hidden = true;
+        projEmptyAll.hidden = true;
+        projCountLine.hidden = true;
+        projEmpty.hidden = false;
+        projEmpty.textContent = "Couldn't read this project's files right now (still syncing?) — tap Refresh to try again.";
+      }
+      showToast(isReadFailed(err) ? "Couldn't read this project's items (a file may still be syncing) — tap Refresh to try again." : "Couldn't read this project's items.");
     });
   }
 
@@ -3696,7 +4489,88 @@
   function showScreen(name){
     Object.keys(screens).forEach(function(k){ screens[k].hidden = (k !== name); });
     hideStatusHistoryPop(); // never leak the popup across a screen change (e.g. "View on plan")
+    navRecord(name); // device Back button (2026-09-25, sweep -- v9) -- see navRecord
   }
+
+  /* ---- Device / browser Back button (2026-09-25, family-wide sweep -- v9) ----
+     Same design as Install ITP v35 / Site Measure v46 / Scheduler v19
+     (Andrew: "can we make it so the phone back button goes back through
+     the app, not close the app"). Every screen change leaves one entry in
+     the browser's own history: the setup / reconnect / Home screens
+     REPLACE (they're the base -- Back from there leaves the app, as it
+     always did), everything deeper PUSHES (Overall Machine Schedule, a
+     project's schedule, the Joinery Item page, and the plan canvas --
+     which is a fixed overlay rather than one of the `screens`, so
+     openPlanCanvasForLevel records it itself). A popstate (the phone's
+     Back button, or the browser's) first closes whatever dialog or popover
+     is open -- through its own Cancel/Close control so any promise it
+     holds settles as a tap on that button would (the cut status panel, the
+     Job notes dialog, the name prompt, the numberpad -- including the cut
+     lockout's PIN re-confirm, which then reads as "Change cancelled" --
+     the "Show me in" list, the status-history popover) -- and otherwise
+     steps back exactly one screen through the app's own existing
+     navigation (plan -> the table it came from; item page -> its table;
+     either table -> Home). This app has no unsaved-changes confirm (every
+     cut tap writes immediately), but the generic "still on the same
+     screen afterwards -> put the entry back so the next press asks again"
+     guard is kept anyway. `history` is never shadowed in this file's outer
+     scope, but window.history is spelled out here to make that impossible
+     to break later. */
+  var currentScreenName = null, navPopInProgress = false;
+  var NAV_BASE = { setup: 1, reconnect: 1, home: 1 };
+  function navRecord(name){
+    if (!name || name === currentScreenName){ navPopInProgress = false; return; }
+    try{
+      if (navPopInProgress || NAV_BASE[name] || !currentScreenName) window.history.replaceState({ utz: name }, "");
+      else window.history.pushState({ utz: name }, "");
+    }catch(e){}
+    currentScreenName = name;
+    navPopInProgress = false;
+  }
+  function navRestoreEntry(){
+    if (!currentScreenName) return;
+    try{ window.history.pushState({ utz: currentScreenName }, ""); }catch(e){}
+  }
+  // Closes the topmost open dialog/popover, if any -- true when it did (the
+  // Back press is then "spent" on that, not on a screen change). Order
+  // matters: the numberpad and name prompt sit ON TOP of the cut status
+  // panel (the lockout's PIN re-confirm opens over it), so they're checked
+  // first.
+  function closeAnyOpenOverlay(){
+    if (!statusHistoryPop.hidden){ hideStatusHistoryPop(); return true; }
+    var pairs = [
+      ["numberpadBackdrop", "numberpadCancel"], ["namePromptBackdrop", "namePromptCancel"],
+      ["identityAppChecksBackdrop", "identityAppChecksCancel"],
+      ["cutStatusModalBackdrop", "cutStatusCloseBtn"], ["jobNoteViewBackdrop", "jobNoteViewCancel"]
+    ];
+    for (var i = 0; i < pairs.length; i++){
+      var bd = document.getElementById(pairs[i][0]);
+      if (!bd || bd.hidden) continue;
+      var btn = document.getElementById(pairs[i][1]);
+      if (btn) btn.click(); else bd.hidden = true;
+      return true;
+    }
+    return false;
+  }
+  function appBackFromDeviceButton(){
+    var from = currentScreenName;
+    switch (from){
+      case "planCanvas": closePlanCanvas(); break;
+      case "joineryItem": backFromJoineryItemBtn.click(); break;
+      case "overall": case "projectSchedule": showScreen("home"); break;
+      default: break;
+    }
+    // Still on the same (non-base) screen means the step back didn't
+    // happen -- put the popped entry back so the next press asks again.
+    if (currentScreenName === from && !NAV_BASE[from]) navRestoreEntry();
+    navPopInProgress = false;
+  }
+  window.addEventListener("popstate", function(){
+    if (closeAnyOpenOverlay()){ navRestoreEntry(); return; }
+    if (!currentScreenName || NAV_BASE[currentScreenName]) return; // base screen: the browser is leaving, as before
+    navPopInProgress = true;
+    appBackFromDeviceButton();
+  });
 
   var projectsRootHandle = null, projectsRootName = "";
   var homeProjectListItems = document.getElementById("homeProjectListItems");
@@ -3713,10 +4587,11 @@
     return "Couldn't open that folder -- try again.";
   }
 
-  // Requests "readwrite" from the start -- this app's only write is a
-  // status transition into the shared joinery-status.json, which happens
-  // the moment someone marks their first item Machined, and asking again
-  // then would mean a second picker/consent round-trip for no benefit.
+  // Requests "readwrite" from the start -- this app's writes are its own
+  // cut events, the shared "machined" status event and the shared name+PIN
+  // registry; the first of those happens the moment someone records their
+  // first cut, and asking again then would mean a second picker/consent
+  // round-trip for no benefit.
   function pickProjectsRootFolder(){
     return window.showDirectoryPicker({ id: "utzline-machine-schedule-root", mode: "readwrite" }).then(function(handle){
       return detectFolderShape(handle).then(function(shape){
@@ -3726,6 +4601,8 @@
           return;
         }
         projectsRootHandle = handle; projectsRootName = handle.name;
+        invalidateDirHandleCache(); // a different root: no cached handle or migration memo from the last one applies
+        overallAllRows = []; projAllRows = []; activeProjectHandle = null; activeProjectName = "";
         // Remembering the folder for next time is a convenience, not a
         // requirement for this session to work -- if persisting it fails
         // for any reason, still show the project list rather than
@@ -3762,33 +4639,53 @@
   });
   reconnectBtn.addEventListener("click", function(){
     if (!projectsRootHandle) return;
+    // (2026-09-25, sweep -- v9) Was an unhandled rejection with no feedback
+    // when the permission prompt itself failed (e.g. handle no longer valid).
     projectsRootHandle.requestPermission({ mode: "readwrite" }).then(function(perm){
       if (perm !== "granted") return;
       populateHome();
+    }).catch(function(err){
+      console.error("Reconnect failed:", err);
+      showToast("Couldn't reconnect to that folder -- choose it again.");
     });
   });
 
+  function renderHomeProjectList(names){
+    homeProjectListItems.innerHTML = "";
+    homeProjectListEmpty.hidden = names.length > 0;
+    names.forEach(function(name){
+      var row = document.createElement("button");
+      row.className = "list-item";
+      row.innerHTML = "<span>" + escapeHtml(name) + "</span><span class=\"chev\">&rsaquo;</span>";
+      row.addEventListener("click", function(){ openProjectSchedule(name); });
+      homeProjectListItems.appendChild(row);
+    });
+  }
+  // (2026-09-25, sweep -- v9) Home paints its last-known project list from
+  // the device-local snapshot at once and shows the screen, then lists the
+  // folder behind it and repaints -- the root listing is one call, but on
+  // an Android/Dropbox folder even that one is a visible wait at boot.
   function populateHome(){
     populateIdentitySelector(); // needs projectsRootHandle to read utzline-users.csv -- best-effort, never blocks
-    return listExistingProjects(projectsRootHandle).then(function(names){
-      homeProjectListItems.innerHTML = "";
-      homeProjectListEmpty.hidden = names.length > 0;
-      names.forEach(function(name){
-        var row = document.createElement("button");
-        row.className = "list-item";
-        row.innerHTML = "<span>" + escapeHtml(name) + "</span><span class=\"chev\">&rsaquo;</span>";
-        row.addEventListener("click", function(){ openProjectSchedule(name); });
-        homeProjectListItems.appendChild(row);
-      });
-      document.title = "UTZLINE Machine Schedule";
+    document.title = "UTZLINE Machine Schedule";
+    return snapGet("home", null).then(function(snap){
+      if (snap && Array.isArray(snap.projects) && snap.projects.length){
+        renderHomeProjectList(snap.projects);
+        showScreen("home");
+      }
+    }).then(function(){
+      return listExistingProjects(projectsRootHandle);
+    }).then(function(names){
+      renderHomeProjectList(names);
       showScreen("home");
+      snapSet("home", null, { projects: names });
     }).catch(function(err){
       console.error("Listing projects failed:", err);
       showToast("Couldn't list projects in this folder.");
     });
   }
   function openProjectSchedule(name){
-    return projectsRootHandle.getDirectoryHandle(name, { create: false }).then(function(dirH){
+    return getProjectHandleByName(name).then(function(dirH){
       showScreen("projectSchedule");
       return loadProjectSchedule(dirH, name);
     }).catch(function(err){
@@ -3815,6 +4712,7 @@
     idbGet("projectsRootHandle").then(function(handle){
       if (!handle){ showScreen("setup"); return; }
       projectsRootHandle = handle; projectsRootName = handle.name;
+      invalidateDirHandleCache();
       return handle.queryPermission({ mode: "readwrite" }).then(function(perm){
         if (perm === "granted"){
           return populateHome();
@@ -3868,12 +4766,19 @@
     onPlanRightClickOrLongPress: onPlanRightClickOrLongPress,
     onPlanTap: onPlanTap,
     planMarkerAt: function(){ return planMarkerAt.apply(null, arguments); },
-    setPlanView: function(v){ Object.assign(planView, v); planApplyTransform(); },
+    setPlanView: function(v){ Object.assign(planView, v); planApplyTransformNow(); },
     getPlanView: function(){ return planView; },
     loadOverallSchedule: loadOverallSchedule,
     loadProjectSchedule: loadProjectSchedule,
     openProjectSchedule: openProjectSchedule,
     setDeviceUserNameForTest: function(name){ deviceUserName = name || ""; updateDeviceUserNameText(); },
+    // (2026-09-25, sweep -- v9) -- the back-button walk, the strict readers
+    // and the snapshot cache, so the new regression tests can exercise them.
+    readUsersCsv: readUsersCsv,
+    readMachiningFlagsRecordForItem: readMachiningFlagsRecordForItem,
+    snapGet: snapGet,
+    getCurrentScreenName: function(){ return currentScreenName; },
+    getDirHandleCacheSize: function(){ return Object.keys(dirHandleCache).length; },
     ready: function(){ return true; }
   };
 

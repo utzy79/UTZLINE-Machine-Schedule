@@ -192,8 +192,21 @@
 // horizontal scroll bar on both tables, and the family-wide status icon
 // swap (in_manufacture 🏭→🔨, machined ⚙️→🪚). No cache-strategy change;
 // CACHE_NAME bumped. See the README's v10 entry.)
+//
+// (v11, 2026-09-26, same day: Andrew, "now update the schedules," -- a new
+// read-only "Required delivery date" column next to Manufacture start;
+// "View on plan" now zooms/centers on the specific item's own marker
+// (ported from UTZLINE Projects' openPlanCanvasForLevel(centerOnMarker),
+// confirmed as the reference "perfect zoom level") instead of just fitting
+// the whole level; and the frozen/sticky-column treatment now has a real,
+// working horizontal scrollbar (a `.screen{min-width:0}` fix -- the table
+// was overflowing the whole page instead of its own .table-scroll wrapper)
+// and is viewport-width-based, not OS/UA-based (sticky only at/above
+// 900px; a plain, fully-scrollable table below it, so it never eats up a
+// small laptop/tablet/phone's limited width). No cache-strategy change;
+// CACHE_NAME bumped. See the README's v11 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v10";
+var CACHE_NAME = "utzline-machine-schedule-cache-v11";
 
 var PRECACHE_URLS = [
   "./",

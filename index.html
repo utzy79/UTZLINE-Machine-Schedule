@@ -287,7 +287,22 @@
     justify-content: center;
     padding: 24px 16px 60px;
   }
-  .screen{ width: 100%; max-width: 980px; }
+  /* (2026-09-26) min-width: 0 overrides a flex item's default automatic
+     min-width, which is otherwise its own max-content size -- for
+     .screen.wide-table that meant .sched-table's forced min-width (schema
+     §2) propagated all the way up through .card and .screen, so .screen
+     itself grew wider than main's available space instead of .table-scroll
+     (below) ever actually overflowing. That's the root cause behind
+     Andrew's report ("did not add the horizontal scroll bar, no way to
+     scroll across on windows"): the real overflow was happening on
+     main/body (fighting main's own justify-content:center, a well-known
+     flex "centered overflow" quirk), not inside .table-scroll where the
+     sticky/frozen columns actually expect their scrolling ancestor to be.
+     With .screen properly shrinking to main's width, .table-scroll is now
+     the genuine overflow boundary -- a normal, always-visible, native
+     scrollbar, and position:sticky's frozen columns freeze relative to the
+     right element. */
+  .screen{ width: 100%; max-width: 980px; min-width: 0; }
   .screen[hidden]{ display: none; }
   .screen.narrow{ max-width: 640px; }
   /* Full-width table screens, built this way from the start (this app has
@@ -512,36 +527,52 @@
   .sched-table td.wrap{ white-space: normal; }
   .sched-table tbody tr:last-child td{ border-bottom: none; }
   .sched-table tbody tr:hover{ background: var(--panel2); }
-  /* ---- Frozen (sticky) identifying columns (schema §5, 2026-09-26) ----
+  /* ---- Frozen (sticky) identifying columns (schema §5, 2026-09-26; made
+     viewport-width-based 2026-09-26 same day, per Andrew's follow-up --
+     see the note below) ----
      Every column up to and including Work order # (Project [Overall table
      only] / Level / Room / Joinery ID / Work order # -- schema §2's
      identifying columns for this table, unchanged/unreordered) stays
      pinned via position:sticky while the new Manufacture start column
      onward scrolls underneath, inside .table-scroll's own overflow-x
-     (below). A real <table> gives every cell in a column the same
+     (above). A real <table> gives every cell in a column the same
      rendered width, so one width per class is enough for every row without
      any per-row JS positioning; the two tables differ only in whether
      Project exists at all, so their own cumulative left offsets are set
      per table id. Background matches the row's own (including its hover
-     state) so text from scrolled-under columns never shows through. */
-  .id-col{ position: sticky; background: var(--panel); z-index: 2; overflow: hidden; text-overflow: ellipsis; }
-  .sched-table th.id-col{ z-index: 3; }
-  .sched-table tbody tr:hover td.id-col{ background: var(--panel2); }
-  .frozen-end{ box-shadow: 3px 0 6px -3px rgba(0,0,0,0.45); }
+     state) so text from scrolled-under columns never shows through.
+
+     Column widths stay fixed at every viewport size (harmless either way),
+     but the STICKY positioning itself (this rule's whole reason for being)
+     is now scoped to STICKY_MIN_WIDTH and up. Andrew, verbatim, same day:
+     "can we remove the freeze on android as you cant use the schedule
+     now" -- asked directly whether this was Android/touch-specific or a
+     general small-screen problem; his answer: "it will be an issue on any
+     smaller screen (small laptop, tablet, phone)." So this is a viewport
+     -width breakpoint, never an OS/UA check -- below it, every column
+     (including these) just scrolls together in one plain, fully
+     -scrollable table, so the frozen columns never eat up a big chunk of
+     a narrow screen's own limited width. */
   .st-project{ width: 130px; max-width: 130px; }
   .st-level{ width: 70px; max-width: 70px; }
   .st-room{ width: 120px; max-width: 120px; }
   .st-joineryId{ width: 110px; max-width: 110px; }
   .st-workorder{ width: 110px; max-width: 110px; }
-  #overallTable .st-project{ left: 0; }
-  #overallTable .st-level{ left: 130px; }
-  #overallTable .st-room{ left: 200px; }
-  #overallTable .st-joineryId{ left: 320px; }
-  #overallTable .st-workorder{ left: 430px; }
-  #projTable .st-level{ left: 0; }
-  #projTable .st-room{ left: 70px; }
-  #projTable .st-joineryId{ left: 190px; }
-  #projTable .st-workorder{ left: 300px; }
+  @media (min-width: 900px){
+    .id-col{ position: sticky; background: var(--panel); z-index: 2; overflow: hidden; text-overflow: ellipsis; }
+    .sched-table th.id-col{ z-index: 3; }
+    .sched-table tbody tr:hover td.id-col{ background: var(--panel2); }
+    .frozen-end{ box-shadow: 3px 0 6px -3px rgba(0,0,0,0.45); }
+    #overallTable .st-project{ left: 0; }
+    #overallTable .st-level{ left: 130px; }
+    #overallTable .st-room{ left: 200px; }
+    #overallTable .st-joineryId{ left: 320px; }
+    #overallTable .st-workorder{ left: 430px; }
+    #projTable .st-level{ left: 0; }
+    #projTable .st-room{ left: 70px; }
+    #projTable .st-joineryId{ left: 190px; }
+    #projTable .st-workorder{ left: 300px; }
+  }
   .status-label{ display: inline-flex; align-items: center; gap: 6px; }
   .status-label .status-icon{ font-size: 13px; }
   .muted-cell{ color: var(--muted2); }
@@ -791,6 +822,7 @@
             <th data-col="joineryId" class="id-col st-joineryId">Joinery ID</th>
             <th data-col="workOrderNo" class="id-col st-workorder frozen-end">Work order #</th>
             <th data-col="manufactureStartDate">Manufacture start</th>
+            <th data-col="requiredDeliveryDate">Required delivery date</th>
             <th data-col="status">Status</th>
             <th data-col="carcase">Carcase</th>
             <th data-col="colourBoard">Colour board</th>
@@ -854,6 +886,7 @@
             <th data-col="joineryId" class="id-col st-joineryId">Joinery ID</th>
             <th data-col="workOrderNo" class="id-col st-workorder frozen-end">Work order #</th>
             <th data-col="manufactureStartDate">Manufacture start</th>
+            <th data-col="requiredDeliveryDate">Required delivery date</th>
             <th data-col="status">Status</th>
             <th data-col="carcase">Carcase</th>
             <th data-col="colourBoard">Colour board</th>
@@ -3079,7 +3112,7 @@
     });
   }
 
-  function openPlanCanvasForLevel(projectHandle, projectName, levelName, returnScreen){
+  function openPlanCanvasForLevel(projectHandle, projectName, levelName, returnScreen, centerOnMarker){
     planActiveProjectHandle = projectHandle;
     planActiveProjectName = projectName;
     planActiveLevelName = levelName;
@@ -3111,6 +3144,39 @@
       planRenderMarkers();
       requestAnimationFrame(function(){
         planFitToView();
+        // (2026-09-26) "View on plan" zoom-to-item -- ported verbatim from
+        // UTZLINE Projects' own openPlanCanvasForLevel(centerOnMarker),
+        // which Andrew confirmed is "the perfect zoom level" (NEXT_RUN_NOTES
+        // item 7, superseding an earlier instruction to match the ITP apps'
+        // PLAN_FOCUS_ZOOM style instead). Same two accepted shapes as
+        // Projects: {room, joineryId} looks up that item's own roomlink
+        // marker; {x, y} centres on a raw world point directly. Only the
+        // two call sites tied to a specific joinery item ("View on plan" on
+        // the Joinery item page and each row's own "View on plan" button)
+        // pass this; the general level-picker "Open plan" button (no single
+        // item in view) omits it and keeps today's plain fit-to-view.
+        if (centerOnMarker){
+          var targetX = null, targetY = null;
+          if (typeof centerOnMarker.x === "number" && typeof centerOnMarker.y === "number"){
+            targetX = centerOnMarker.x;
+            targetY = centerOnMarker.y;
+          } else {
+            var marker = (planSaved.objects || []).filter(function(o){
+              return o.type === "roomlink" && o.roomName === centerOnMarker.room && o.joineryCode === centerOnMarker.joineryId;
+            })[0];
+            if (marker){ targetX = marker.x; targetY = marker.y; }
+          }
+          if (targetX !== null){
+            var w = planCanvasStageWrap.clientWidth, h = planCanvasStageWrap.clientHeight;
+            // Zoom in at least as close as a 1:1 pixel view so the target is
+            // easy to pick out, but never zoom back OUT past whatever
+            // fit-to-view already chose.
+            planView.scale = Math.max(planView.scale, 1);
+            planView.tx = w / 2 - targetX * planView.scale;
+            planView.ty = h / 2 - targetY * planView.scale;
+            planApplyTransform();
+          }
+        }
       });
       if (!level){
         showToast("No saved plan found for this level yet.");
@@ -3759,7 +3825,7 @@
   jiViewOnPlanBtn.addEventListener("click", function(){
     if (!activeJoineryItemRow) return;
     var row = activeJoineryItemRow;
-    openPlanCanvasForLevel(row.projectHandle, row.project, row.level, joineryItemReturnScreen);
+    openPlanCanvasForLevel(row.projectHandle, row.project, row.level, joineryItemReturnScreen, { room: row.room, joineryId: row.joineryId });
   });
 
   /* ============================== generic new-name prompt (identity only) ==============================
@@ -4085,6 +4151,12 @@
         // app never writes it, just displays it, bare, no delay pill (schema
         // §3 note: this column gets none this round).
         manufactureStartDate: (mainScheduleRec && mainScheduleRec.manufactureStartDate) || "",
+        // (2026-09-26) Andrew, verbatim: "add a required delivery date
+        // column ir the machine schedule, after the manufacture start
+        // date." Same read-only cross-reference into the MAIN Scheduler's
+        // own joinery-schedule.json as manufactureStartDate above, just the
+        // other field off the same folded record -- see scheduleRowCells.
+        requiredDeliveryDate: (mainScheduleRec && mainScheduleRec.requiredDeliveryDate) || "",
         statusKey: statusKey,
         statusHistory: statusHistory,
         machinedDone: machined.done,
@@ -4230,6 +4302,7 @@
       "<td class=\"id-col st-joineryId\">" + escapeHtml(row.joineryId) + "</td>" +
       "<td class=\"id-col st-workorder frozen-end\">" + (row.workOrderNo ? escapeHtml(row.workOrderNo) : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td>" + (row.manufactureStartDate ? escapeHtml(formatDateDisplay(row.manufactureStartDate)) : "<span class=\"muted-cell\">—</span>") + "</td>" +
+      "<td>" + (row.requiredDeliveryDate ? escapeHtml(formatDateDisplay(row.requiredDeliveryDate)) : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td class=\"status-cell\">" + statusLabelHtml(row.statusKey) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "carcase", true) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "colourBoard", true) + "</td>" +
@@ -4267,7 +4340,7 @@
       });
     }
     viewBtn.addEventListener("click", function(){
-      withHandle(function(h){ return openPlanCanvasForLevel(h, row.project, row.level, returnScreen); });
+      withHandle(function(h){ return openPlanCanvasForLevel(h, row.project, row.level, returnScreen, { room: row.room, joineryId: row.joineryId }); });
     });
     // Each cut's Done/N/A button pair -- same performCutAction front door
     // the plan-marker cut status panel uses, so "requires sign-in", "tap

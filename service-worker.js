@@ -184,8 +184,16 @@
 // last-known IndexedDB snapshots, in-place row patching after a cut tap);
 // Android touch robustness. Nothing about any on-disk format or filename
 // changes. See the README's v9 entry.)
+//
+// (v10, 2026-09-26: shared-round follow-up -- new read-only "Manufacture
+// start" column (a fresh, read-only cross-reference into the MAIN
+// Scheduler's own event-sourced joinery-schedule.json, including its own
+// legacy-migration port), frozen/sticky identifying columns + a real
+// horizontal scroll bar on both tables, and the family-wide status icon
+// swap (in_manufacture 🏭→🔨, machined ⚙️→🪚). No cache-strategy change;
+// CACHE_NAME bumped. See the README's v10 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v9";
+var CACHE_NAME = "utzline-machine-schedule-cache-v10";
 
 var PRECACHE_URLS = [
   "./",

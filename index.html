@@ -41,6 +41,10 @@
                                                        (hasSolidSurface added 2026-09-23 by UTZLINE Projects, this app only reads it)
       joinery-status.json                         <- the shared, forward-only status pipeline (rank/label/icon copied verbatim below)
       Project Saves/Floor Plans/<Project> - <Level>.json   <- floor plan image + `markers` (roomlink objects), for the plan viewer
+      Project Saves/Joinery Schedule/<key>/        <- the MAIN Scheduler's own event-sourced joinery-schedule.json (v10, 2026-09-26)
+                                                       -- read-only, for the new "Manufacture start" column only; see
+                                                       readMainJoinerySchedule below (ported from Solid Surface Schedule's
+                                                       own identical read-only port of this same file)
 
   DATA IT WRITES: this app owns exactly ONE file of its own,
   "machining-flags.json" (see the dedicated header comment further down,
@@ -97,8 +101,8 @@
   family without any migration step:
     ""               -> rank 0, "Created"
     "measured"        -> rank 1, "Check measured",    📏
-    "in_manufacture"  -> rank 2, "In manufacture",    🏭
-    "machined"        -> rank 3, "Machined",          ⚙️   <- what THIS app writes
+    "in_manufacture"  -> rank 2, "In manufacture",    🔨
+    "machined"        -> rank 3, "Machined",          🪚   <- what THIS app writes
     "manufactured"    -> rank 4, "Ready to dispatch", 📦
     "delivered"       -> rank 5, "Delivered",         🚚
     "installed"       -> rank 6, "Installed",         🏆
@@ -495,7 +499,7 @@
      table painted from its last-known device-local snapshot is being
      refreshed from the folder in the background. */
   .refresh-note{ font-size: 12px; color: var(--muted2); margin: 0 0 10px; }
-  .sched-table{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+  .sched-table{ width: 100%; border-collapse: collapse; font-size: 13px; min-width: 1050px; }
   .sched-table th{
     text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 600;
     border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
@@ -508,6 +512,36 @@
   .sched-table td.wrap{ white-space: normal; }
   .sched-table tbody tr:last-child td{ border-bottom: none; }
   .sched-table tbody tr:hover{ background: var(--panel2); }
+  /* ---- Frozen (sticky) identifying columns (schema §5, 2026-09-26) ----
+     Every column up to and including Work order # (Project [Overall table
+     only] / Level / Room / Joinery ID / Work order # -- schema §2's
+     identifying columns for this table, unchanged/unreordered) stays
+     pinned via position:sticky while the new Manufacture start column
+     onward scrolls underneath, inside .table-scroll's own overflow-x
+     (below). A real <table> gives every cell in a column the same
+     rendered width, so one width per class is enough for every row without
+     any per-row JS positioning; the two tables differ only in whether
+     Project exists at all, so their own cumulative left offsets are set
+     per table id. Background matches the row's own (including its hover
+     state) so text from scrolled-under columns never shows through. */
+  .id-col{ position: sticky; background: var(--panel); z-index: 2; overflow: hidden; text-overflow: ellipsis; }
+  .sched-table th.id-col{ z-index: 3; }
+  .sched-table tbody tr:hover td.id-col{ background: var(--panel2); }
+  .frozen-end{ box-shadow: 3px 0 6px -3px rgba(0,0,0,0.45); }
+  .st-project{ width: 130px; max-width: 130px; }
+  .st-level{ width: 70px; max-width: 70px; }
+  .st-room{ width: 120px; max-width: 120px; }
+  .st-joineryId{ width: 110px; max-width: 110px; }
+  .st-workorder{ width: 110px; max-width: 110px; }
+  #overallTable .st-project{ left: 0; }
+  #overallTable .st-level{ left: 130px; }
+  #overallTable .st-room{ left: 200px; }
+  #overallTable .st-joineryId{ left: 320px; }
+  #overallTable .st-workorder{ left: 430px; }
+  #projTable .st-level{ left: 0; }
+  #projTable .st-room{ left: 70px; }
+  #projTable .st-joineryId{ left: 190px; }
+  #projTable .st-workorder{ left: 300px; }
   .status-label{ display: inline-flex; align-items: center; gap: 6px; }
   .status-label .status-icon{ font-size: 13px; }
   .muted-cell{ color: var(--muted2); }
@@ -751,11 +785,12 @@
       <table class="sched-table" id="overallTable">
         <thead>
           <tr>
-            <th data-col="project">Project</th>
-            <th data-col="level">Level</th>
-            <th data-col="room">Room</th>
-            <th data-col="joineryId">Joinery ID</th>
-            <th data-col="workOrderNo">Work order #</th>
+            <th data-col="project" class="id-col st-project">Project</th>
+            <th data-col="level" class="id-col st-level">Level</th>
+            <th data-col="room" class="id-col st-room">Room</th>
+            <th data-col="joineryId" class="id-col st-joineryId">Joinery ID</th>
+            <th data-col="workOrderNo" class="id-col st-workorder frozen-end">Work order #</th>
+            <th data-col="manufactureStartDate">Manufacture start</th>
             <th data-col="status">Status</th>
             <th data-col="carcase">Carcase</th>
             <th data-col="colourBoard">Colour board</th>
@@ -814,10 +849,11 @@
       <table class="sched-table" id="projTable">
         <thead>
           <tr>
-            <th data-col="level">Level</th>
-            <th data-col="room">Room</th>
-            <th data-col="joineryId">Joinery ID</th>
-            <th data-col="workOrderNo">Work order #</th>
+            <th data-col="level" class="id-col st-level">Level</th>
+            <th data-col="room" class="id-col st-room">Room</th>
+            <th data-col="joineryId" class="id-col st-joineryId">Joinery ID</th>
+            <th data-col="workOrderNo" class="id-col st-workorder frozen-end">Work order #</th>
+            <th data-col="manufactureStartDate">Manufacture start</th>
             <th data-col="status">Status</th>
             <th data-col="carcase">Carcase</th>
             <th data-col="colourBoard">Colour board</th>
@@ -1710,8 +1746,8 @@
       case "installed": return "🏆";
       case "delivered": return "🚚";
       case "manufactured": return "📦";
-      case "machined": return "⚙️";
-      case "in_manufacture": return "🏭";
+      case "machined": return "🪚";
+      case "in_manufacture": return "🔨";
       case "measured": return "📏";
       default: return "";
     }
@@ -2496,6 +2532,166 @@
       showToast(isReadFailed(err) ? "Couldn't read utzline-users.csv (still syncing?) — nothing was changed. Try again in a moment." : "Couldn't verify your PIN — try again.");
       return null;
     });
+  }
+
+  /* ============================== main Scheduler's own schedule file (READ-ONLY cross-reference) ==============================
+     Added 2026-09-26 for Andrew's "manufacture start date only, taken from
+     the main schedule" request (see the new "Manufacture start" column,
+     scheduleRowCells below). This app never had any schedule-date file of
+     its own and does not gain one now -- this is a pure, read-only
+     cross-reference into the MAIN UTZLINE Scheduler's own
+     "joinery-schedule.json" (`Project Saves/Joinery Schedule/<key>/`, key =
+     joineryItemPageKey), ported verbatim from UTZLINE Solid Surface
+     Schedule's own identical read-only port of the same file (its own
+     readMainJoinerySchedule/foldMainJoinerySchedule/
+     migrateLegacyMainJoineryScheduleIfNeeded/readMainScheduleRecordForItem,
+     search that app's index.html for "joinery-schedule.json v2:
+     event-sourced storage" -- itself a copy-paste of the family's shared
+     event-sourced-file shape already used above for joinery-status.json
+     and machining-flags.json). This app NEVER writes joinery-schedule.json
+     -- only the Scheduler itself does that. */
+  /* ---- joinery-schedule.json v2: event-sourced storage (v5, 2026-09-24) ----
+     This app is strictly READ-ONLY against the MAIN Scheduler's own
+     schedule file, so only the fold/migrate/read side is ported (see
+     Solid Surface Schedule's own comment on this exact block for the full
+     reasoning). An item's current schedule is its single LATEST event by
+     timestamp -- a "clear" event means no schedule, otherwise that event's
+     own fields ARE the record. */
+  function mainJoineryScheduleFilename(){ return "joinery-schedule.json"; }
+  function mainJoineryScheduleEventsBranchName(){ return "Joinery Schedule"; }
+  // Memoised per project (getCachedDir) -- see getJoineryStatusEventsRootDir.
+  function getMainJoineryScheduleEventsRootDir(projectHandle, create){
+    return projectDir(projectHandle, [projectSavesDirName(), mainJoineryScheduleEventsBranchName()], !!create);
+  }
+  function getMainJoineryScheduleItemDir(projectHandle, key, create){
+    return getMainJoineryScheduleEventsRootDir(projectHandle, create).then(function(rootH){
+      return rootH.getDirectoryHandle(key, { create: !!create });
+    });
+  }
+  function foldMainJoinerySchedule(events){
+    if (!events || !events.length) return null;
+    var latest = null;
+    events.forEach(function(e){ if (!latest || (e.at || "") > (latest.at || "")) latest = e; });
+    if (!latest || latest.kind === "clear") return null;
+    return {
+      level: latest.level || "", room: latest.room || "", joineryId: latest.joineryId || "",
+      requiredDeliveryDate: latest.requiredDeliveryDate || "",
+      manufactureLeadTimeDays: latest.manufactureLeadTimeDays,
+      manufactureStartDate: latest.manufactureStartDate || "",
+      updatedAt: latest.at,
+      setBy: latest.by || ""
+    };
+  }
+  // [] only when the legacy file genuinely isn't there; read_failed for one
+  // that exists but won't read -- see migrateLegacyMainJoineryScheduleIfNeeded.
+  function readLegacyMainJoinerySchedule(projectHandle){
+    return readJsonArrayFileStrict(projectHandle, mainJoineryScheduleFilename(), mainJoineryScheduleFilename());
+  }
+  function findMainScheduleRecord(list, level, room, joineryId){
+    for (var i = 0; i < list.length; i++){
+      var rec = list[i];
+      if (rec && rec.level === level && (rec.room || "") === (room || "") && (rec.joineryId || "") === (joineryId || "")) return rec;
+    }
+    return null;
+  }
+  // Same reordering/"unreadable is not empty" discipline as every other
+  // legacy migration in this app: read the legacy file FIRST, strictly;
+  // only then create the events folder and write the events -- this app
+  // performing the MAIN Scheduler's own migration for a file it only ever
+  // READS is exactly why getting the order right matters here (the
+  // Scheduler, Solid Surface Schedule and this app can all be the first to
+  // open a given project after the Scheduler's own v15 update). Memoised
+  // per project per session, alongside this app's own migrations' keys.
+  function migrateLegacyMainJoineryScheduleIfNeeded(projectHandle){
+    var memoKey = (projectHandle && projectHandle.name || "") + "\u0000mainSchedule";
+    if (migratedThisSession[memoKey]) return Promise.resolve(false);
+    return getMainJoineryScheduleEventsRootDir(projectHandle, false).then(function(){
+      migratedThisSession[memoKey] = true;
+      return false;
+    }, function(err){
+      if (!isNotFoundErr(err)) return Promise.reject(readFailedErr("Joinery Schedule folder", err)); // can't tell -> don't migrate
+      return readLegacyMainJoinerySchedule(projectHandle).then(function(list){
+        return getMainJoineryScheduleEventsRootDir(projectHandle, true).then(function(){ return list; });
+      }).then(function(list){
+        var writes = [];
+        list.forEach(function(rec){
+          if (!rec) return;
+          var key = joineryItemPageKey(rec.level, rec.room, rec.joineryId);
+          var at = rec.updatedAt || new Date(0).toISOString();
+          var payload = {
+            kind: "set", level: rec.level || "", room: rec.room || "", joineryId: rec.joineryId || "",
+            requiredDeliveryDate: rec.requiredDeliveryDate || "",
+            manufactureLeadTimeDays: rec.manufactureLeadTimeDays,
+            manufactureStartDate: rec.manufactureStartDate || "",
+            by: rec.setBy || "", at: at
+          };
+          var stamp = statusEventStampFromIso(at);
+          writes.push(getMainJoineryScheduleItemDir(projectHandle, key, true).then(function(dirH){
+            return dirH.getFileHandle(statusEventFileName(payload.by, stamp, "set"), { create: true });
+          }).then(function(fh){
+            return fh.createWritable();
+          }).then(function(w){
+            return w.write(JSON.stringify(payload)).then(function(){ return w.close(); });
+          }).catch(function(){}));
+        });
+        return Promise.all(writes);
+      }).then(function(){ migratedThisSession[memoKey] = true; return true; }).catch(function(err){
+        if (isReadFailed(err)) return Promise.reject(err); // legacy file exists but couldn't be read: nothing created, surface it
+        return false;
+      });
+    });
+  }
+  // Whole-project soft fold for the tables (mirrors readMachiningFlags
+  // exactly) -- feeds buildEnrichedRows' new manufactureStartDate field for
+  // EVERY row, via findMainScheduleRecord. Rejects read_failed only when
+  // the legacy file or the events folder's own existence check can't be
+  // read (the whole project's load then fails and says so, same as an
+  // unreadable Machining Flags or Joinery Status folder does today) --
+  // an individual item's own event file mid-sync is soft-folded instead
+  // (readFoldedEventBranch), so that one row's date is simply a save
+  // behind for a moment rather than failing the whole table.
+  function readMainJoinerySchedule(projectHandle){
+    if (!projectHandle) return Promise.resolve([]);
+    return migrateLegacyMainJoineryScheduleIfNeeded(projectHandle).then(function(){
+      return getMainJoineryScheduleEventsRootDir(projectHandle, false).then(null, function(err){
+        if (isNotFoundErr(err)) return null;
+        forgetProjectDir(projectHandle, [projectSavesDirName()]);
+        return Promise.reject(readFailedErr("Joinery Schedule folder", err));
+      });
+    }).then(function(rootH){
+      if (rootH === null) return readLegacyMainJoinerySchedule(projectHandle);
+      return readFoldedEventBranch(projectHandle, rootH, mainJoineryScheduleEventsBranchName(), foldMainJoinerySchedule);
+    });
+  }
+  // STRICT single-item read, ported for parity with Solid Surface
+  // Schedule's own reference implementation (not currently wired into any
+  // UI here -- this app has no per-item schedule dialog to prefill -- but
+  // exposed via __testHooks and kept available for a future round). Every
+  // event file for the item must read cleanly (one retry each) or this
+  // rejects read_failed; null only when the item genuinely has no record.
+  function readMainScheduleRecordForItem(projectHandle, level, room, joineryId){
+    var key = joineryItemPageKey(level, room, joineryId);
+    return migrateLegacyMainJoineryScheduleIfNeeded(projectHandle).then(function(){
+      return getMainJoineryScheduleEventsRootDir(projectHandle, false).then(function(rootH){
+        return readEventsForItemStrict(rootH.getDirectoryHandle(key, { create: false }), "main schedule events for " + key).then(foldMainJoinerySchedule);
+      }, function(err){
+        if (isNotFoundErr(err)) return readLegacyMainJoinerySchedule(projectHandle).then(function(list){ return findMainScheduleRecord(list, level, room, joineryId); });
+        forgetProjectDir(projectHandle, [projectSavesDirName()]);
+        return Promise.reject(readFailedErr("Joinery Schedule folder", err));
+      });
+    });
+  }
+  // Bare YYYY-MM-DD -> "Thu, Aug 13, 2026" display, ported verbatim from
+  // Solid Surface Schedule's own formatDateDisplay (this app had no
+  // schedule-date column before now, so no date-display helper of its own
+  // existed to reuse).
+  function formatDateDisplay(dateStr){
+    if (!dateStr) return "";
+    var d = new Date(dateStr + "T00:00:00Z");
+    if (isNaN(d.getTime())) return dateStr;
+    try{
+      return d.toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+    }catch(e){ return dateStr; }
   }
 
   /* ============================== Status-history hover popup ==============================
@@ -3870,12 +4066,13 @@
   }
 
   /* ============================== enriched row building (shared by both tables) ============================== */
-  function buildEnrichedRows(items, statusList, machiningList, projectName, projectHandle){
+  function buildEnrichedRows(items, statusList, machiningList, projectName, projectHandle, mainScheduleList){
     return items.map(function(item){
       var statusRec = findJoineryStatus(statusList, item.level, item.room, item.joineryId);
       var statusKey = (statusRec || {}).status || "";
       var statusHistory = joineryStatusHistoryFor(statusList, item.level, item.room, item.joineryId);
       var machined = machinedInfoFor(statusList, item.level, item.room, item.joineryId);
+      var mainScheduleRec = findMainScheduleRecord(mainScheduleList || [], item.level, item.room, item.joineryId);
       return {
         project: projectName,
         projectHandle: projectHandle,
@@ -3883,6 +4080,11 @@
         room: item.room,
         joineryId: item.joineryId,
         workOrderNo: item.workOrderNo,
+        // Read-only cross-reference into the MAIN Scheduler's own
+        // joinery-schedule.json (see readMainJoinerySchedule above) -- this
+        // app never writes it, just displays it, bare, no delay pill (schema
+        // §3 note: this column gets none this round).
+        manufactureStartDate: (mainScheduleRec && mainScheduleRec.manufactureStartDate) || "",
         statusKey: statusKey,
         statusHistory: statusHistory,
         machinedDone: machined.done,
@@ -4017,11 +4219,17 @@
       "</div>" + meta;
   }
   function scheduleRowCells(row, showProject){
-    return (showProject ? "<td>" + escapeHtml(row.project) + "</td>" : "") +
-      "<td>" + escapeHtml(row.level) + "</td>" +
-      "<td>" + escapeHtml(row.room) + "</td>" +
-      "<td>" + escapeHtml(row.joineryId) + "</td>" +
-      "<td>" + (row.workOrderNo ? escapeHtml(row.workOrderNo) : "<span class=\"muted-cell\">—</span>") + "</td>" +
+    // The first N columns (Project [Overall only] / Level / Room / Joinery
+    // ID / Work order #) are the item-identifying columns (schema §2) --
+    // frozen via sticky positioning (schema §5, see .id-col/.st-*/
+    // .frozen-end CSS), so the new Manufacture start column onward is what
+    // actually scrolls under them.
+    return (showProject ? "<td class=\"id-col st-project\">" + escapeHtml(row.project) + "</td>" : "") +
+      "<td class=\"id-col st-level\">" + escapeHtml(row.level) + "</td>" +
+      "<td class=\"id-col st-room\">" + escapeHtml(row.room) + "</td>" +
+      "<td class=\"id-col st-joineryId\">" + escapeHtml(row.joineryId) + "</td>" +
+      "<td class=\"id-col st-workorder frozen-end\">" + (row.workOrderNo ? escapeHtml(row.workOrderNo) : "<span class=\"muted-cell\">—</span>") + "</td>" +
+      "<td>" + (row.manufactureStartDate ? escapeHtml(formatDateDisplay(row.manufactureStartDate)) : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td class=\"status-cell\">" + statusLabelHtml(row.statusKey) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "carcase", true) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "colourBoard", true) + "</td>" +
@@ -4278,9 +4486,10 @@
           return Promise.all([
             readJoineryItems(projectHandle),
             readJoineryStatuses(projectHandle),
-            readMachiningFlags(projectHandle)
+            readMachiningFlags(projectHandle),
+            readMainJoinerySchedule(projectHandle)
           ]).then(function(res){
-            return { name: name, rows: buildEnrichedRows(res[0], res[1], res[2], name, projectHandle) };
+            return { name: name, rows: buildEnrichedRows(res[0], res[1], res[2], name, projectHandle, res[3]) };
           });
         }).catch(function(err){
           console.error("Reading project \"" + name + "\" for the Overall Machine Schedule failed:", err);
@@ -4451,11 +4660,12 @@
         readJoineryItems(projectHandle),
         readJoineryStatuses(projectHandle),
         listExistingLevels(projectHandle),
-        readMachiningFlags(projectHandle)
+        readMachiningFlags(projectHandle),
+        readMainJoinerySchedule(projectHandle)
       ]);
     }).then(function(res){
       if (seq !== projLoadSeq) return; // superseded
-      var rows = buildEnrichedRows(res[0], res[1], res[3], projectName, projectHandle);
+      var rows = buildEnrichedRows(res[0], res[1], res[3], projectName, projectHandle, res[4]);
       applyProjectScheduleState(rows, res[2]);
       projRefreshNote.hidden = true;
       snapSet("project", projectName, { rows: rows.map(rowToSnapshot), planLevels: res[2] });
@@ -4776,6 +4986,14 @@
     // and the snapshot cache, so the new regression tests can exercise them.
     readUsersCsv: readUsersCsv,
     readMachiningFlagsRecordForItem: readMachiningFlagsRecordForItem,
+    // (2026-09-26, v10) -- the new read-only "Manufacture start" column,
+    // ported from Solid Surface Schedule's own reference implementation.
+    readMainJoinerySchedule: readMainJoinerySchedule,
+    readMainScheduleRecordForItem: readMainScheduleRecordForItem,
+    foldMainJoinerySchedule: foldMainJoinerySchedule,
+    findMainScheduleRecord: findMainScheduleRecord,
+    migrateLegacyMainJoineryScheduleIfNeeded: migrateLegacyMainJoineryScheduleIfNeeded,
+    formatDateDisplay: formatDateDisplay,
     snapGet: snapGet,
     getCurrentScreenName: function(){ return currentScreenName; },
     getDirHandleCacheSize: function(){ return Object.keys(dirHandleCache).length; },

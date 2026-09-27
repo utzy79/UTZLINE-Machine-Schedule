@@ -243,7 +243,8 @@
 // CACHE_NAME bumped. New run_machine_schedule_sub_orders_card.js
 // (pdftest-projects). See the README's v15 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v15";
+// v16 (2026-09-27): "Schedule Backups" folder hidden from the project list.
+var CACHE_NAME = "utzline-machine-schedule-cache-v16";
 
 var PRECACHE_URLS = [
   "./",

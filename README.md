@@ -1,6 +1,8 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v15** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v16** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v16 (2026-09-27):** Hides the **Schedule Backups** folder from the project list. Scheduler v29 now keeps its daily spreadsheet backups in that folder, directly in the main Projects folder (Andrew: *"a schedule backups folder directly in the main folder ... I meant in the main folder. Not the individual projects folder."*). Every app lists every folder in the main folder as a project, so each one now leaves that folder out: `isReservedRootFolderName`, the same one-line rule in every app. Tested across all 11 apps by `pdftest-projects/run_schedule_backups_folder_hidden.js`, which fails on every app's previous build and passes on the new ones.
 
 **v15 (2026-09-27):** "Sub orders" card, with mark as received, on the Joinery Item page. Andrew, verbatim: *"ok now we need all joinery summary pages to show the associated orders. with the option to mark them as recieved."* This app's joinery summary page is its own Joinery Item page (`#screenJoineryItem`, "Open item" on any schedule row), ported from UTZLINE Projects', so it gets the same "Sub orders" card Projects already has, in the same place (between Rework and Delivery location).
 

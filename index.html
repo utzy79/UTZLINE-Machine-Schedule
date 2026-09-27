@@ -101,8 +101,8 @@
   family without any migration step:
     ""               -> rank 0, "Created"
     "measured"        -> rank 1, "Check measured",    📏
-    "in_manufacture"  -> rank 2, "In manufacture",    🔨
-    "machined"        -> rank 3, "Machined",          🪚   <- what THIS app writes
+    "in_manufacture"  -> rank 2, "In manufacture",    🏭
+    "machined"        -> rank 3, "Machined",          ⚙️   <- what THIS app writes
     "manufactured"    -> rank 4, "Ready to dispatch", 📦
     "delivered"       -> rank 5, "Delivered",         🚚
     "installed"       -> rank 6, "Installed",         🏆
@@ -1779,8 +1779,8 @@
       case "installed": return "🏆";
       case "delivered": return "🚚";
       case "manufactured": return "📦";
-      case "machined": return "🪚";
-      case "in_manufacture": return "🔨";
+      case "machined": return "⚙️";
+      case "in_manufacture": return "🏭";
       case "measured": return "📏";
       default: return "";
     }

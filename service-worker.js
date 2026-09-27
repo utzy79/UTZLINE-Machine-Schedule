@@ -205,8 +205,13 @@
 // 900px; a plain, fully-scrollable table below it, so it never eats up a
 // small laptop/tablet/phone's limited width). No cache-strategy change;
 // CACHE_NAME bumped. See the README's v11 entry.)
+//
+// (v12, 2026-09-26, same day: family-wide status icon revert -- in_manufacture
+// back to 🏭, machined back to ⚙️ (NEXT_RUN_NOTES.md item 2). Shipped as its
+// own version since v11 was already delivered before this fix landed. No
+// cache-strategy change; CACHE_NAME bumped. See the README's v12 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v11";
+var CACHE_NAME = "utzline-machine-schedule-cache-v12";
 
 var PRECACHE_URLS = [
   "./",

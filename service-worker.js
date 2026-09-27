@@ -232,8 +232,18 @@
 // run_machine_schedule_company_logo_readonly.js (pdftest-projects). Same
 // fix already shipped family-wide to Install/Manufacture/Delivery ITP and
 // Site Measure/Viewer.)
+// (v15, 2026-09-27: Sub orders card -- Andrew, verbatim: "ok now we need
+// all joinery summary pages to show the associated orders. with the
+// option to mark them as recieved." The Joinery Item page gains a "Sub
+// orders" card (UTZLINE Sub Orders' orders attached to the item, grouped
+// by type, each openable) with a Received checkbox + date per order that
+// writes ONLY received/receivedDate back into Sub Orders' Orders/*.json,
+// via a shallow copy of the raw on-disk entry. Read once per item-page
+// open through the directory-handle cache. No cache-strategy change;
+// CACHE_NAME bumped. New run_machine_schedule_sub_orders_card.js
+// (pdftest-projects). See the README's v15 entry.)
 var ICON_VERSION = "v1";
-var CACHE_NAME = "utzline-machine-schedule-cache-v14";
+var CACHE_NAME = "utzline-machine-schedule-cache-v15";
 
 var PRECACHE_URLS = [
   "./",

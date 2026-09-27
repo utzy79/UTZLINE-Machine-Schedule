@@ -1,6 +1,41 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v14** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v15** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v15 (2026-09-27):** "Sub orders" card, with mark as received, on the Joinery Item page. Andrew, verbatim: *"ok now we need all joinery summary pages to show the associated orders. with the option to mark them as recieved."* This app's joinery summary page is its own Joinery Item page (`#screenJoineryItem`, "Open item" on any schedule row), ported from UTZLINE Projects', so it gets the same "Sub orders" card Projects already has, in the same place (between Rework and Delivery location).
+
+- **What it shows:** every UTZLINE Sub Orders order attached to the item's `(level, room, joineryId)`, read from `Project Saves/UTZLINE Sub Orders/Orders/<Level> - <Room> - <Code>.json`. Orders are grouped under a heading per type with a count: the base four first, in Sub Orders' own order (steel, upholstery, timber, aluminium), then custom types alphabetically. Headings and chips use the order's own `typeLabel` first (Sub Orders stores it on every order), then the base label, then the raw key. That way a custom type shows its real name ("Glass Panels", not `glass-panels`) without this app keeping a copy of Sub Orders' type list. The base four keep their exact validated chip colours (steel `#3987e5`, upholstery `#d95926`, timber `#199e70`, aluminium `#c98500` with dark text). Every custom type shares one neutral chip built from this app's own `--panel2`/`--text`/`--border` tokens. There is never a new hue, because the base four already sit at the validated colour-safety ceiling. Each row shows the chip, the required-by date, supplier/PO/notes, a status line, and the same Open button the Job notes and Shop drawings cards use. The Open button's file comes from Sub Orders' `Files/<storedName>`. If that file is missing, only that row's Open is hidden.
+- **Mark as received:** each order has a Received checkbox and a date, with the same interaction as Sub Orders' own View Orders list:
+  - Unticked, the date is hidden.
+  - Ticking fills today's local date if it's empty, shows the date and saves straight away.
+  - Unticking saves `received: false` and `receivedDate: null`.
+  - Changing the date while ticked saves again.
+  
+  After each save the row's checkbox, date and status line update in place from what was actually written. This isn't PIN-gated and doesn't need anyone signed in. Marking an order received isn't a cut change (the v7 lockout covers cuts only), and Sub Orders doesn't record a name against it either.
+- **The write (`setSubOrderReceived`)** re-reads the Orders file fresh and finds the entry by `id`. It replaces that entry with a shallow copy of the raw on-disk entry (`Object.assign({}, raw, {received, receivedDate})`), then writes the whole array back as `JSON.stringify(array, null, 2)`, the same shape Sub Orders' `writeAttachedOrders` uses. It never uses a field allowlist and never writes back the card's display object, so `typeLabel` and any field Sub Orders adds later carry through untouched. Sub Orders' own `setOrderReceived` needed its v5 fix today because an allowlist there dropped `typeLabel`. The "unreadable is not empty" rule applies:
+  - If the folder, file or order entry is gone (unattached or moved in Sub Orders since the page opened), nothing is written. The row reverts and a toast says so. This app never creates the file.
+  - If the file exists but can't be read, it retries once (`readTextFileStrict`) and then shows "couldn't read (still syncing?) — nothing was changed".
+  
+  This app only ever reads Sub Orders' `Inbox/` and `Files/`.
+- **Filenames:** `subOrdersFileNameFor` uses a new `subOrdersFileBase`, a byte-for-byte copy of Sub Orders' own `sanitizeFileBase`. This app's existing `sanitizeFileBase` gives the same result for any real name. The two differ only when a name is empty: this app falls back to `"plan"` and Sub Orders to `"file"`. That difference would miss the file Sub Orders wrote for an item with a blank room.
+- **Speed:** the card reads once per Joinery Item page open, like every other card on that page. The read goes through the per-session directory-handle cache (`projectDir`/`getCachedDir`). Nothing is read during a table render, per row, or on hover. The new test proves the schedule table does zero Orders lookups and the page open does exactly one.
+
+New `run_machine_schedule_sub_orders_card.js` (in `pdftest-projects`, on `fake-fs.js`). It covers:
+- grouping and order;
+- exact chip colours;
+- a custom type's real `typeLabel` on the neutral chip;
+- Open only where the Files/ file exists, and opening it;
+- the empty state;
+- a tick writing through with every other field preserved (`typeLabel` and a made-up `futureField` included) in Sub Orders' exact JSON shape;
+- a date edit;
+- untick clearing both fields;
+- a custom-type tick keeping its `typeLabel`;
+- an unreadable file and an order removed behind the page, each writing nothing;
+- a blank-room item finding Sub Orders' own `"file"`-fallback filename;
+- viewing without interacting writing nothing;
+- Sub Orders' `Inbox/` and `Files/` byte-for-byte unchanged, with nothing created or removed.
+
+Full Machine Schedule suite **12/12** (11 existing + this one). The existing tests needed no changes. `service-worker.js` cache → `utzline-machine-schedule-cache-v15`.
 
 **v14 (2026-09-27):** Read-only "Company logo" preview (NEXT_RUN_NOTES.md item 8's family-wide scope, confirmed 2026-09-27: "every other app" means ALL apps, not just the three ITP apps already fixed). Andrew, verbatim: "change company logo should only be visable in the projects app, in every other app it should load the one chosen in projects." This app never showed a company logo anywhere before now — a new "Company logo" card was added to the Home screen (`#screenHome`), right below the identity row and above the "Projects" list: a 56×56 preview box (or a "No logo" placeholder), read-only, no upload/remove controls. Sourced from the exact same shared `company-logo.png` file UTZLINE Projects owns at the Projects root (`projectsRootHandle`, the same root `utzline-users.csv` already comes from) — `readCompanyLogoReadOnly()` decodes the raw file bytes into an object URL (no downscaling, since this app has no PDF export of a logo to feed). Refreshed from `populateHome()` alongside the existing `populateIdentitySelector()` call, best-effort with no error if the file simply isn't there yet. New `run_machine_schedule_company_logo_readonly.js` (no upload/remove UI anywhere in the DOM; the preview shows/hides correctly with/without `company-logo.png` at the root, no error either way), using a new minimal `setFakeCompanyLogoForTest()`/`companyLogoPreviewHTML()` pair on the app's existing `window.__testHooks`. Full pre-existing regression suite re-run clean (10 files).
 
@@ -273,6 +308,16 @@ item is non-`"pending"`:
 setJoineryStatusForward(projectHandle, level, room, joineryId, "machined", updatedBy);
 ```
 
+**Since v15, one narrow cross-app write:** the Joinery Item page's "Sub
+orders" card reads UTZLINE Sub Orders' `Project Saves/UTZLINE Sub
+Orders/Orders/<Level> - <Room> - <Code>.json` (and resolves each order's
+file under `.../Files/` for Open), and its Received checkbox + date write
+**only** `received`/`receivedDate` back into that existing Orders file —
+a shallow copy of the raw on-disk entry, every other field untouched.
+Nothing in Sub Orders' `Inbox/` or `Files/` is ever created, written or
+deleted, and this app never creates an Orders file that isn't already
+there.
+
 Also, at the **Projects-root level** (a sibling of every project folder,
 not inside one), this app reads/writes the same shared
 `utzline-users.csv` name+PIN registry every other UTZLINE app uses — this
@@ -443,6 +488,10 @@ on **both** the Overall and per-project schedule screens:
 
 `pdftest-projects/run_machine_schedule_joinery_item_page.js` — v8's
 read-only Joinery Item page (see the v8 entry above).
+
+`pdftest-projects/run_machine_schedule_sub_orders_card.js` — v15's Sub
+orders card and its Received checkbox + date (see the v15 entry above).
+Uses `pdftest-projects/fake-fs.js`.
 
 `pdftest-projects/run_machine_schedule_sweep_back_button.js`,
 `run_machine_schedule_sweep_idb_single_connection.js`,

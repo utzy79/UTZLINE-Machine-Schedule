@@ -1,6 +1,35 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v16** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v17** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v17 (2026-09-28) — Reworks on the machine schedule, with a Cut button.** Andrew, on the Scheduler's new rework register: *"this should be visible on the machining schedule also. with a cut button for when cut"*. Then: *"what happened to doing the rework logs in the schedules"*.
+
+- **Reworks to cut:** a card at the top of the **Overall Machine Schedule** and of each **project's Machine Schedule**.
+  - It lists every outstanding rework that hasn't been cut yet: code, cabinet, project/level/room, the text, and who logged it and when.
+  - Each has a **Cut** button and **Open**, and the card has a **Rework register** button and Hide/Show.
+  - It disappears when there's nothing to cut.
+  - It paints from what's already known, then re-reads in the background only after the table has finished loading (so they never fight over the tablet's storage), at most every 3 minutes. A project's own schedule reads only that project's reworks.
+- **Rework register** (Home): every rework, all projects or one.
+  - Cut sits on each row that isn't cut yet. Reworks the Scheduler has marked ready to deliver show that state with no Cut button.
+  - Delivered ones are in their own green section at the bottom.
+- **Cut** needs a signed-in name, like every cut here. **Undo cut** (on the rework page) needs the PIN, like the cut lockout.
+- **The rework page** has the photos, the full status log, a comment box with a "Sent to saw" quick pick, and **Print / Share**. They make a PDF for this rework named by who and when, with the whole log and the photos at 4 per A4 page, and save a copy beside the item's rework PDFs.
+- **No conflict copies:** a Cut is a new file, `<name> - <date time> - state.json` (status `machined`), in the rework's log folder. Install ITP's shared rework file is never rewritten.
+- **Joinery Item page:** the Rework card shows each rework's current state, delivered ones green and last, **Open rework**, and the item's rework PDFs.
+- All of it is the shared `UtzRework` block (the same one as Scheduler v30), pasted in by `shared/sync_rework_module.py`. `jspdf.umd.min.js` is vendored and loaded only when printing or sharing.
+- **Tests:**
+  - New: `pdftest-projects/run_machine_schedule_rework_cut.js`. It covers:
+    - the strip lists only uncut reworks (a Scheduler "ready" event and a delivered rework are left out);
+    - a Cut with no name writes nothing;
+    - Cut writes the state file, leaves Install ITP's file untouched and empties the strip;
+    - the register states and the Delivered section;
+    - Undo cut with the PIN;
+    - Print saves a stamped PDF;
+    - the project strip, the item card, and no page errors.
+  - Updated for the new card: `run_machine_schedule_joinery_item_page.js`.
+  - Every Machine Schedule test passes.
+
+`service-worker.js` cache → `utzline-machine-schedule-cache-v17` (precaches `jspdf.umd.min.js`).
 
 **v16 (2026-09-27):** Hides the **Schedule Backups** folder from the project list. Scheduler v29 now keeps its daily spreadsheet backups in that folder, directly in the main Projects folder (Andrew: *"a schedule backups folder directly in the main folder ... I meant in the main folder. Not the individual projects folder."*). Every app lists every folder in the main folder as a project, so each one now leaves that folder out: `isReservedRootFolderName`, the same one-line rule in every app. Tested across all 11 apps by `pdftest-projects/run_schedule_backups_folder_hidden.js`, which fails on every app's previous build and passes on the new ones.
 

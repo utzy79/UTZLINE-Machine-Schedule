@@ -1292,8 +1292,8 @@
      state      { status: "logged" | "machined" | "manufactured", undo?: true }
                 machined = "Cut" (Machine Schedule), manufactured =
                 "Complete -- ready to deliver" (Scheduler)
-     delivered  { receivedDate? }       (read now; Delivery ITP to write later)
-     closed     {}                      (read now; Install ITP to write later)
+     delivered  { receivedDate, deliveryLocationPin?, locationSnapshot? }   (Delivery ITP, v22+)
+     closed     {}                      (Install ITP "Save & close out", v43+)
    FOLD: an entry's state is the latest state change (its own statusHistory
    plus state events, by time); delivered (in the file or as an event) always
    wins; closed likewise. Events with a reworkId only apply to that entry.
@@ -1385,13 +1385,17 @@
   }
   // Write, then read the size back (Android storage can report the old size
   // for a moment -- one retry). Resolves the handle.
-  function writeVerified(dirH, name, blob){
+  // data: a Blob (PDFs) or a string (event JSON -- written as text, which
+  // every file handle takes, and some older test fakes only handle).
+  function writeVerified(dirH, name, data){
+    var expected = (typeof data === "string") ? new Blob([data]).size : data.size;
+    var blob = data;
     function attempt(){
       return dirH.getFileHandle(name, { create: true }).then(function(fh){
         return fh.createWritable().then(function(w){
           return w.write(blob).then(function(){ return w.close(); });
         }).then(function(){ return fh.getFile(); }).then(function(f){
-          if (f.size !== blob.size){ var e = new Error("write didn't land (size " + f.size + " vs " + blob.size + ")"); e.code = "size_mismatch"; throw e; }
+          if (typeof f.size === "number" && f.size !== expected){ var e = new Error("write didn't land (size " + f.size + " vs " + expected + ")"); e.code = "size_mismatch"; throw e; }
           return fh;
         });
       });
@@ -1502,6 +1506,12 @@
     }, function(){});
     return Promise.all([flat, legacy]).then(function(){ return { rows: rows, unreadable: unreadable }; });
   }
+  // A row for the item an ITP app has open (it knows where it is already).
+  function rowFor(isFlat, level, room, code, entry, projectName){
+    var fileBase = isFlat ? sanitizeFileBase(level) + " - " + sanitizeFileBase(room) + " - " + sanitizeFileBase(code) : sanitizeFileBase(code);
+    return { project: projectName || "", level: level, room: room, code: code, fileBase: fileBase, fileName: fileBase + ".json", isFlat: !!isFlat,
+      levelDir: isFlat ? "" : level, roomDir: isFlat ? "" : room, entry: entry || {} };
+  }
   function dataDir(projectHandle, row){
     return row.isFlat ? dirPath(projectHandle, FLAT_DATA, false) : dirPath(projectHandle, [LEGACY_ROOT, row.levelDir || row.level, row.roomDir || row.room], false);
   }
@@ -1569,9 +1579,9 @@
     };
     Object.keys(fields || {}).forEach(function(k){ ev[k] = fields[k]; });
     var name = userSlug(by) + " - " + stamp(at) + " - " + kind + ".json";
-    var blob = new Blob([JSON.stringify(ev)], { type: "application/json" });
+    var text = JSON.stringify(ev);
     return logDir(projectHandle, row, true).then(function(dirH){
-      return writeVerified(dirH, name, blob);
+      return writeVerified(dirH, name, text);
     }).then(function(){ ev._file = name; return ev; });
   }
 
@@ -1602,15 +1612,22 @@
     if (entry.received || entry.status === "delivered" || deliveredFile){
       delivered = {
         at: (deliveredFile && deliveredFile.at) || (entry.status === "delivered" ? entry.statusAt : "") || entry.receivedDate || "",
-        by: entry.receivedBy || (deliveredFile && deliveredFile.by) || "", date: entry.receivedDate || "", src: "file"
+        by: entry.receivedBy || (deliveredFile && deliveredFile.by) || "", date: entry.receivedDate || "", src: "file",
+        pin: entry.deliveryLocationPin || null, snapshot: (entry.locationSnapshot && entry.locationSnapshot.dataUrl) ? entry.locationSnapshot : null
       };
     }
-    evs.forEach(function(ev){
-      if (ev.kind !== "delivered") return;
-      if (!delivered || (delivered.src === "event" && String(ev.at) < String(delivered.at))){
-        delivered = { at: ev.at || "", by: ev.by || "", date: ev.receivedDate || String(ev.at || "").slice(0, 10), src: "event", app: ev.app || "" };
-      }
+    // Delivered events: the FIRST is the delivery (its date stays); a later
+    // one is a retaken pin -- its pin + snapshot replace the earlier ones.
+    var delEvs = evs.filter(function(ev){ return ev.kind === "delivered"; }).sort(function(a, b){ return String(a.at).localeCompare(String(b.at)); });
+    var retakes = [];
+    delEvs.forEach(function(ev, k){
+      if (!delivered){
+        delivered = { at: ev.at || "", by: ev.by || "", date: ev.receivedDate || String(ev.at || "").slice(0, 10), src: "event", app: ev.app || "", pin: null, snapshot: null };
+      } else retakes.push(ev);
+      if (ev.deliveryLocationPin) delivered.pin = ev.deliveryLocationPin;
+      if (ev.locationSnapshot && ev.locationSnapshot.dataUrl) delivered.snapshot = ev.locationSnapshot;
     });
+    if (delivered) delivered.retakes = retakes;
     var closed = null;
     if (entry.closed) closed = { at: entry.closedAt || "", by: entry.closedBy || "", src: "file" };
     evs.forEach(function(ev){
@@ -1644,7 +1661,10 @@
       var label = STATES[c.status] ? STATES[c.status].long : c.status;
       out.push({ at: c.at, by: c.by, what: c.undo ? ("Undone — back to " + label) : label, kind: c.status, app: c.app || "" });
     });
-    if (f.delivered) out.push({ at: f.delivered.at, by: f.delivered.by, what: "Delivered to site" + (f.delivered.date && String(f.delivered.at).slice(0, 10) !== f.delivered.date ? " (" + f.delivered.date + ")" : ""), kind: "delivered", app: f.delivered.app || "" });
+    if (f.delivered){
+      out.push({ at: f.delivered.at, by: f.delivered.by, what: "Delivered to site" + (f.delivered.date && String(f.delivered.at).slice(0, 10) !== f.delivered.date ? " (" + f.delivered.date + ")" : ""), kind: "delivered", app: f.delivered.app || "" });
+      (f.delivered.retakes || []).forEach(function(ev){ out.push({ at: ev.at || "", by: ev.by || "", what: "Delivery pin + photo retaken", kind: "delivered", app: ev.app || "" }); });
+    }
     if (f.closed) out.push({ at: f.closed.at, by: f.closed.by, what: "Closed out", kind: "closed", app: f.closed.app || "" });
     f.comments.forEach(function(c){ out.push({ at: c.at, by: c.by || "", what: "Comment: " + (c.text || ""), kind: "comment", app: c.app || "" }); });
     out.sort(function(a, b){ return String(b.at || "").localeCompare(String(a.at || "")); });
@@ -1709,8 +1729,10 @@
     var photos = (Array.isArray(entry.photos) ? entry.photos : []).filter(function(p){ return p && p.dataUrl; }).map(function(p, i){
       return { dataUrl: p.dataUrl, w: p.w, h: p.h, caption: "Photo " + (i + 1) + (p.addedAt || p.addedBy ? " — " + [fmtDate(p.addedAt, true), p.addedBy || ""].filter(Boolean).join(" — ") : "") };
     });
-    if (entry.locationSnapshot && entry.locationSnapshot.dataUrl){
-      var s = entry.locationSnapshot;
+    var fd = fold(entry, opts.events).delivered;
+    var snapSrc = (entry.locationSnapshot && entry.locationSnapshot.dataUrl) ? entry.locationSnapshot : (fd && fd.snapshot) || null;
+    if (snapSrc){
+      var s = snapSrc;
       photos.push({ dataUrl: s.dataUrl, w: s.w, h: s.h, caption: "Delivery location" + (s.capturedAt || s.capturedBy ? " — " + [fmtDate(s.capturedAt, true), s.capturedBy || ""].filter(Boolean).join(" — ") : "") });
     }
     // Photos saved without a size get measured first (keeps their shape).
@@ -1821,37 +1843,51 @@
     });
     if (!lines.length){ doc.text("(nothing logged yet)", M + 4, y); y += 12; }
 
-    // Photos: a quarter of an A4 page each, 4 per page, on their own pages.
+    // Photos: a quarter of an A4 page each (2 across). They start on page 1
+    // straight under the log when a row fits there, and only run on to the
+    // next pages (4 per page) when they don't (Andrew: "rework pdf photo
+    // size is good right now, but only overflow to page 2,3,etc if they
+    // dont fit on page 1").
     if (photos.length){
-      var PM = 24, GAP = 12, headH = 18, capH = 13;
+      var PM = 24, GAP = 12, headH = 18, capH = 13, footH = 26;
       var cellW = (W - PM * 2 - GAP) / 2;
-      var cellH = (H - PM - headH - 26 - GAP) / 2;
-      var pages = Math.ceil(photos.length / 4);
-      photos.forEach(function(p, i){
-        var slot = i % 4;
-        if (slot === 0){
-          doc.addPage();
-          doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor.apply(doc, RED);
-          doc.text("PHOTOS — " + [row.code, entry.cabinetNumber ? "Cabinet " + entry.cabinetNumber : "", row.level, row.room].filter(Boolean).join(" · "), PM, PM + 8);
-          doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(110);
-          doc.text("Page " + (Math.floor(i / 4) + 1) + " of " + pages, W - PM, PM + 8, { align: "right" });
+      var cellH = (H - PM - headH - footH - GAP) / 2;
+      var photoTitle = "PHOTOS — " + [row.code, entry.cabinetNumber ? "Cabinet " + entry.cabinetNumber : "", row.level, row.room].filter(Boolean).join(" · ");
+      var py = y + 14;
+      function photoPage(){
+        doc.addPage();
+        doc.setFont("helvetica", "bold").setFontSize(9.5).setTextColor.apply(doc, RED);
+        doc.text(photoTitle, PM, PM + 8);
+        doc.setTextColor(20);
+        py = PM + headH;
+      }
+      if (py + 16 + cellH > H - footH) photoPage();
+      else {
+        doc.setFont("helvetica", "bold").setFontSize(10).setTextColor.apply(doc, RED);
+        doc.text("PHOTOS", M, py);
+        doc.setTextColor(20);
+        py += 10;
+      }
+      for (var pi = 0; pi < photos.length; pi += 2){
+        if (py + cellH > H - footH) photoPage();
+        for (var col = 0; col < 2 && pi + col < photos.length; col++){
+          var ph = photos[pi + col];
+          var cx = PM + col * (cellW + GAP), cy = py;
+          var box = fitInto(ph.w, ph.h, cellW, cellH - capH);
+          var ox = cx + (cellW - box.w) / 2, oy = cy; // top of the cell, caption right under it
+          try{
+            doc.addImage(ph.dataUrl, imageFormat(ph.dataUrl), ox, oy, box.w, box.h, undefined, "FAST");
+            doc.setDrawColor(190).setLineWidth(0.6).rect(ox, oy, box.w, box.h);
+          }catch(e){
+            doc.setDrawColor(200).rect(cx, cy, cellW, cellH - capH);
+            doc.setFontSize(8).setTextColor(150).text("(photo couldn't be drawn)", cx + 8, cy + 16);
+          }
+          doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(90);
+          doc.text(doc.splitTextToSize(ph.caption, cellW)[0] || "", cx + cellW / 2, oy + box.h + 10, { align: "center" });
           doc.setTextColor(20);
         }
-        var cx = PM + (slot % 2) * (cellW + GAP);
-        var cy = PM + headH + Math.floor(slot / 2) * (cellH + GAP);
-        var box = fitInto(p.w, p.h, cellW, cellH - capH);
-        var ox = cx + (cellW - box.w) / 2, oy = cy; // top of the cell, caption right under it
-        try{
-          doc.addImage(p.dataUrl, imageFormat(p.dataUrl), ox, oy, box.w, box.h, undefined, "FAST");
-          doc.setDrawColor(190).setLineWidth(0.6).rect(ox, oy, box.w, box.h);
-        }catch(e){
-          doc.setDrawColor(200).rect(cx, cy, cellW, cellH - capH);
-          doc.setFontSize(8).setTextColor(150).text("(photo couldn't be drawn)", cx + 8, cy + 16);
-        }
-        doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(90);
-        doc.text(doc.splitTextToSize(p.caption, cellW)[0] || "", cx + cellW / 2, oy + box.h + 10, { align: "center" });
-        doc.setTextColor(20);
-      });
+        py += cellH + GAP;
+      }
     }
 
     var total = doc.internal.getNumberOfPages();
@@ -2451,7 +2487,7 @@
         else if (f.status === cfg.action.status) act += "<span class=\"urw-done-note\">✓ " + escapeHtml(cfg.action.doneNote) + (f.statusBy ? " — " + escapeHtml(f.statusBy) : "") + (f.statusAt ? ", " + escapeHtml(fmtDate(f.statusAt, true)) : "") + "</span><button type=\"button\" class=\"btn secondary sm\" data-urw-d=\"undo\">" + escapeHtml(cfg.action.undoButton || "Undo") + "</button>";
       }
       var photos = (d.full && Array.isArray(d.full.photos)) ? d.full.photos.filter(function(p){ return p && p.dataUrl; }) : [];
-      var snap = d.full && d.full.locationSnapshot && d.full.locationSnapshot.dataUrl ? d.full.locationSnapshot : null;
+      var snap = d.full && d.full.locationSnapshot && d.full.locationSnapshot.dataUrl ? d.full.locationSnapshot : ((f.delivered && f.delivered.snapshot) || null);
       var lines = logLines(e, evs);
       el.innerHTML =
         "<div class=\"row backrow\"><button class=\"btn secondary sm\" data-urw-d=\"back\">&larr; Back</button><h1 style=\"margin:0;\">" + escapeHtml(title) + "</h1></div>" +
@@ -2707,7 +2743,7 @@
   global.UtzRework = {
     VERSION: 1, STATES: STATES, STATE_ORDER: STATE_ORDER, QUICK_COMMENTS: QUICK_COMMENTS,
     stamp: stamp, userSlug: userSlug, sanitizeFileBase: sanitizeFileBase, fmtDate: fmtDate,
-    listProjectReworks: listProjectReworks, listItemReworks: listItemReworks, readFullEntry: readFullEntry,
+    listProjectReworks: listProjectReworks, listItemReworks: listItemReworks, readFullEntry: readFullEntry, rowFor: rowFor, slimEntry: slimEntry,
     readLog: readLog, writeEvent: writeEvent, logDir: logDir, fold: fold, logLines: logLines, stateLabel: stateLabel,
     pdfFileName: pdfFileName, buildPdf: buildPdf, savePdf: savePdf, listItemPdfs: listItemPdfs, pdfDir: pdfDir,
     create: create

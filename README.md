@@ -1,6 +1,11 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v17** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v18** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v18 (2026-09-28) — Reworks: delivery pin + photo, and a shorter PDF.** This version is the same shared rework code update as Scheduler v31:
+- Delivered comes from Delivery ITP's own file, including its pin, its location photo and any retakes.
+- In the rework PDF, the photos start on page 1 and only run on to later pages when they don't fit.
+- Tests: `pdftest-projects/run_machine_schedule_rework_cut.js` still passes, and `run_rework_cross_app.js` is new.
 
 **v17 (2026-09-28) — Reworks on the machine schedule, with a Cut button.** Andrew, on the Scheduler's new rework register: *"this should be visible on the machining schedule also. with a cut button for when cut"*. Then: *"what happened to doing the rework logs in the schedules"*.
 

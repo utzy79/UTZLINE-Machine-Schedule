@@ -245,7 +245,8 @@
 var ICON_VERSION = "v1";
 // v16 (2026-09-27): "Schedule Backups" folder hidden from the project list.
 // v17 (2026-09-28): reworks on the machine schedule with a Cut button (shared rework module); jspdf.umd.min.js precached.
-var CACHE_NAME = "utzline-machine-schedule-cache-v17";
+// v18 (2026-09-28): rework module: Delivery ITP delivered events (pin, photo, retakes); PDF photos start on page 1.
+var CACHE_NAME = "utzline-machine-schedule-cache-v18";
 
 var PRECACHE_URLS = [
   "./jspdf.umd.min.js", // v17: PDF library for rework Print/Share (only loaded when someone prints or shares)

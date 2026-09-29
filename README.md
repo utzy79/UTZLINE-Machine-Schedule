@@ -1,6 +1,23 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v18** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v20 (RC 1.0)** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v20 (2026-09-29) — RC 1.0.** Andrew: *"ok, now change them all to version RC 1.0. and have that on the logos (small)"*.
+
+- The app is now **RC 1.0** (release candidate 1.0) across the UTZLINE family. A small **RC 1.0** tag sits beside the logo in the header.
+- The build number (v20) still counts up underneath, so installed copies pick up each update. It's also what the Windows installer "Setup RC 1.0" contains.
+
+**v19 (2026-09-28) — "PC Date", long press on a row, Sent / Returned shop drawings.**
+
+- **"PC Date".** The Required delivery date shows a **PC Date** tag when the date is the project's PC date (UTZLINE Projects v35). Folds cached by v18 are read again once, so the tag shows straight away.
+- **Long press a row to open its item page.** Andrew: *"in the schedules, make it so a long press on a row takes you to that joinery item summary page"*. It works the same as the Scheduler: hold for about half a second (or right-click). Scrolling cancels it, and buttons in the row work as before.
+- **Shop drawings: Sent and Returned.** The item page's card has **Sent** and **Returned** parts. Each shows its latest, with **All revisions (n)** / **All returned (n)** for the rest. Revisions read as REV A, B, C.
+- **Fixes:**
+  - The frozen columns no longer leave gaps that scrolled text showed through on a wide table (there since v10).
+  - The long-press tint keeps the frozen columns solid.
+- Tests:
+  - New: `run_machine_schedule_v19_pc_date.js`, `run_machine_schedule_v19_row_long_press.js`, `run_machine_schedule_v19_shop_drawings.js`, `run_machine_schedule_v19_frozen_columns_contiguous.js`.
+  - Updated: `run_machine_schedule_joinery_item_page.js`.
 
 **v18 (2026-09-28) — Reworks: delivery pin + photo, and a shorter PDF.** This version is the same shared rework code update as Scheduler v31:
 - Delivered comes from Delivery ITP's own file, including its pin, its location photo and any retakes.

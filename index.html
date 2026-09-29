@@ -451,6 +451,12 @@
   .meta-grid{ display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
   .meta-grid dt{ color: var(--muted); }
   .meta-grid dd{ margin: 0; }
+  /* (v19) Shop drawings: Sent / Returned */
+  .sd-part-title{ font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 10px 0 4px; }
+  .sd-part-title:first-of-type{ margin-top: 2px; }
+  .sd-revs-btn{ margin-top: 8px; }
+  .sd-revs{ margin-top: 8px; border-left: 3px solid var(--border); padding-left: 10px; }
+  .sd-revs[hidden]{ display: none; }
   .doc-row{
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 8px 0; border-top: 1px solid var(--border);
@@ -651,6 +657,15 @@
   .sched-table td.wrap{ white-space: normal; }
   .sched-table tbody tr:last-child td{ border-bottom: none; }
   .sched-table tbody tr:hover{ background: var(--panel2); }
+  /* v19 -- "PC Date": the project's PC date standing in as an item's required delivery date */
+  .pc-note{ display:inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: rgba(240,178,62,.16); color: #f0b23e; white-space: nowrap; vertical-align: 1px; }
+  /* v19 -- a long press on a row opens its joinery item page */
+  .sched-table tbody tr{ -webkit-touch-callout: none; }
+  /* (v19) the tint is an inset shadow over the cell's own background, not a
+     translucent background -- the frozen columns must stay opaque or the
+     columns scrolled under them show through while a row is held */
+  .sched-table tbody tr.lp-pressing td{ box-shadow: inset 0 0 0 100vmax rgba(31,143,191,0.18); transition: box-shadow .5s; }
+  @media (pointer: coarse){ .sched-table tbody tr{ -webkit-user-select: none; user-select: none; } }
   /* ---- Frozen (sticky) identifying columns (schema §5, 2026-09-26; made
      viewport-width-based 2026-09-26 same day, per Andrew's follow-up --
      see the note below) ----
@@ -684,9 +699,20 @@
   .st-workorder{ width: 110px; max-width: 110px; }
   @media (min-width: 900px){
     .id-col{ position: sticky; background: var(--panel); z-index: 2; overflow: hidden; text-overflow: ellipsis; }
+    /* (v19) min-width too: once the table is wider than its scroller, Chrome
+       shrinks a cell's `width` down to its content (e.g. "L1" -> 66px), and
+       the fixed left offsets below then left gaps between the frozen cells
+       that the scrolled columns showed through. Only while frozen -- below
+       900px the columns size as before. */
+    .st-project{ min-width: 130px; }
+    .st-level{ min-width: 70px; }
+    .st-room{ min-width: 120px; }
+    .st-joineryId{ min-width: 110px; }
+    .st-workorder{ min-width: 110px; }
     .sched-table th.id-col{ z-index: 3; }
     .sched-table tbody tr:hover td.id-col{ background: var(--panel2); }
     .frozen-end{ box-shadow: 3px 0 6px -3px rgba(0,0,0,0.45); }
+    .sched-table tbody tr.lp-pressing td.frozen-end{ box-shadow: inset 0 0 0 100vmax rgba(31,143,191,0.18), 3px 0 6px -3px rgba(0,0,0,0.45); }
     #overallTable .st-project{ left: 0; }
     #overallTable .st-level{ left: 130px; }
     #overallTable .st-room{ left: 200px; }
@@ -830,12 +856,15 @@
   .error-note{ color: #ff8080; font-size: 13px; margin-top: 10px; }
   .error-note[hidden]{ display: none; }
 </style>
+<style>/* (RC 1.0) the small release tag on the logo */
+.rc-tag{ display:inline-block; margin-left:7px; padding:0 4px; border:1px solid currentColor; border-radius:4px; font-size:9px; line-height:13px; font-weight:600; letter-spacing:.05em; opacity:.55; vertical-align:middle; position:relative; top:-1px; white-space:nowrap; text-transform:none; font-style:normal; }
+</style>
 </head>
 <body>
 
 <header>
   <img src="./icons/icon-192.png" alt="">
-  <div class="brand">UTZLINE Machine Schedule<small>track carcase / colour board / solid surface cuts</small></div>
+  <div class="brand">UTZLINE Machine Schedule<span class="rc-tag" title="Release candidate 1.0">RC 1.0</span><small>track carcase / colour board / solid surface cuts</small></div>
 </header>
 
 <main>
@@ -1074,7 +1103,11 @@
     </div>
     <div class="card">
       <h2 class="section-title">Shop drawings</h2>
+      <!-- (v19) Andrew: "shop drawings need a sent and a returned section" -->
+      <h3 class="sd-part-title">Sent</h3>
       <div id="itemShopDrawingsList"></div>
+      <h3 class="sd-part-title">Returned</h3>
+      <div id="itemShopReturnedList"></div>
     </div>
     <div class="card">
       <h2 class="section-title">Job notes</h2>
@@ -3586,8 +3619,13 @@
      actually read. Only a fold in which EVERY file read cleanly is
      remembered -- a fold that had to skip a mid-sync file is recomputed
      next time ("unreadable is not empty" carries through to the cache). */
-  function readFoldedEventBranch(projectHandle, rootH, branch, foldFn){
+  // foldVersion (v19): bump it whenever foldFn's OUTPUT gains a field, so a
+  // record folded and cached by an older version (same files, so the same
+  // signature) is folded again instead of reused without the new field --
+  // e.g. the main schedule's "PC Date" note, which v18's cache lacks.
+  function readFoldedEventBranch(projectHandle, rootH, branch, foldFn, foldVersion){
     var cacheKey = "eventFolds\u0000" + (projectsRootName || "") + "\u0000" + ((projectHandle && projectHandle.name) || "") + "\u0000" + branch;
+    var fv = foldVersion || 0;
     return Promise.all([listEventItemDirs(rootH), idbGet(cacheKey).catch(function(){ return null; })]).then(function(r){
       var dirs = r[0], cached = (r[1] && typeof r[1] === "object") ? r[1] : {};
       var next = {};
@@ -3595,11 +3633,11 @@
         return listJsonFileHandlesIn(dirH).then(function(handles){
           var sig = handles.map(function(h){ return h.name; }).sort().join("\u0000");
           var hit = cached[dirH.name];
-          if (hit && hit.sig === sig){ next[dirH.name] = hit; return hit.rec; }
+          if (hit && hit.sig === sig && (hit.fv || 0) === fv){ next[dirH.name] = hit; return hit.rec; }
           return Promise.all(handles.map(readJsonFileHandle)).then(function(events){
             var allRead = events.every(function(e){ return e && typeof e === "object"; });
             var rec = foldFn(events.filter(function(e){ return e && typeof e === "object"; }));
-            if (allRead) next[dirH.name] = { sig: sig, rec: rec };
+            if (allRead) next[dirH.name] = fv ? { sig: sig, rec: rec, fv: fv } : { sig: sig, rec: rec };
             return rec;
           });
         }, function(){ return null; });
@@ -4283,7 +4321,8 @@
       manufactureLeadTimeDays: latest.manufactureLeadTimeDays,
       manufactureStartDate: latest.manufactureStartDate || "",
       updatedAt: latest.at,
-      setBy: latest.by || ""
+      setBy: latest.by || "",
+      note: latest.note || "" // v19 -- "PC Date" when UTZLINE Projects set it from the project's PC date
     };
   }
   // [] only when the legacy file genuinely isn't there; read_failed for one
@@ -4364,7 +4403,7 @@
       });
     }).then(function(rootH){
       if (rootH === null) return readLegacyMainJoinerySchedule(projectHandle);
-      return readFoldedEventBranch(projectHandle, rootH, mainJoineryScheduleEventsBranchName(), foldMainJoinerySchedule);
+      return readFoldedEventBranch(projectHandle, rootH, mainJoineryScheduleEventsBranchName(), foldMainJoinerySchedule, 2); // 2 = v19, the fold carries `note`
     });
   }
   // STRICT single-item read, ported for parity with Solid Surface
@@ -5107,26 +5146,43 @@
       return sdH.getDirectoryHandle(key, { create: false });
     });
   }
+  /* (v19) Andrew: "we call them REV A    REV B and so on". A drawing's
+     revisions are lettered -- REV A (the first), REV B, ... REV Z, REV AA.
+     A file saved as "REV 0/1/2 - ..." (numbered, 23-28 Sep 2026) reads as
+     REV A/B/C, in the same order -- nothing on disk is renamed. The
+     first-day "RevA - ..." files still read as before. */
+  function shopRevLetters(n){
+    var out = ""; n = Math.max(0, n | 0) + 1;
+    while (n > 0){ var r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); }
+    return out;
+  }
   function parseShopDrawingRevisionFileName(fileName){
-    var m = /^REV (\d+) - /.exec(fileName) || /^Rev([A-Z]+) - /.exec(fileName);
+    var m = /^REV ([A-Z]{1,3}|\d+) - /.exec(fileName), legacy = m ? null : /^Rev([A-Z]+) - /.exec(fileName);
     var revLabel = "REV ?";
-    if (m) revLabel = (/^\d+$/.test(m[1]) ? "REV " + m[1] : "Rev" + m[1]);
-    var afterRev = m ? fileName.slice(m[0].length) : fileName;
+    if (m) revLabel = "REV " + (/^\d+$/.test(m[1]) ? shopRevLetters(parseInt(m[1], 10)) : m[1]);
+    else if (legacy) revLabel = "Rev" + legacy[1];
+    var hit = m || legacy;
+    var afterRev = hit ? fileName.slice(hit[0].length) : fileName;
     var idx = afterRev.indexOf(" - ");
     var displayName = idx >= 0 ? afterRev.slice(idx + 3) : afterRev;
-    return { revLabel: revLabel, displayName: displayName };
+    var stamp = idx >= 0 && /^\d{4}-\d{2}-\d{2}/.test(afterRev) ? afterRev.slice(0, idx) : ""; // when it was saved
+    return { revLabel: revLabel, displayName: displayName, stamp: stamp };
   }
+
   function revLabelValue(revLabel){
-    var m = /^REV (\d+)$/.exec(revLabel || "");
-    if (m) return parseInt(m[1], 10);
+    var m = /^REV ([A-Z]{1,3})$/.exec(revLabel || "");
+    if (m){ var v = 0; for (var i = 0; i < m[1].length; i++){ v = v * 26 + (m[1].charCodeAt(i) - 64); } return v - 1; } // (v19) REV A = 0
+    var d = /^REV (\d+)$/.exec(revLabel || "");
+    if (d) return parseInt(d[1], 10);
     var legacy = /^Rev([A-Z]+)$/.exec(revLabel || "");
     if (legacy){
       var letters = legacy[1], n = 0;
-      for (var i = 0; i < letters.length; i++){ n = n * 26 + (letters.charCodeAt(i) - 64); }
+      for (var j = 0; j < letters.length; j++){ n = n * 26 + (letters.charCodeAt(j) - 64); }
       return n - 1000000;
     }
     return -1;
   }
+
   function listShopDrawingsForItem(projectHandle, key){
     return getShopDrawingsDirForItem(projectHandle, key).then(function(dirH){
       return everySubdir(dirH).then(function(groupHandles){
@@ -5134,18 +5190,89 @@
           return listFilesInDir(groupH, function(name){ return /\.pdf$/i.test(name); }).then(function(files){
             var revisions = files.map(function(f){
               var parsed = parseShopDrawingRevisionFileName(f.fileName);
-              return { fileName: f.fileName, handle: f.handle, revLabel: parsed.revLabel, displayName: parsed.displayName };
+              return { fileName: f.fileName, handle: f.handle, revLabel: parsed.revLabel, displayName: parsed.displayName, stamp: parsed.stamp };
             });
             revisions.sort(function(a, b){ return revLabelValue(a.revLabel) - revLabelValue(b.revLabel); });
-            return { drawingId: groupH.name, revisions: revisions };
+            // (v19) the copies that came back, in the drawing's own "Returned" folder
+            return listShopDrawingReturned(groupH).then(function(returned){ return { drawingId: groupH.name, revisions: revisions, returned: returned }; });
           });
         }));
       });
     }, function(){ return []; }).then(function(groups){
-      groups = (groups || []).filter(function(g){ return g.revisions.length > 0; });
+      groups = (groups || []).filter(function(g){ return g.revisions.length > 0 || g.returned.length > 0; });
       groups.sort(function(a, b){ return b.drawingId.localeCompare(a.drawingId); });
       return groups;
     });
+  }
+
+
+  /* ---- (v19) Shop drawings: Sent and Returned ----
+     Andrew: "shop drawings need a sent and a returned section" and "second
+     shop drawing + for a joinery item will alwasy be a new revision".
+     On disk (a drawing's folder, as always):
+       Shop Drawings/<item>/<drawing>/REV n - <saved> - <file>.pdf            sent
+       Shop Drawings/<item>/<drawing>/Returned/REV n - <saved> - <file>.pdf   returned (n = the sent revision it answers)
+     Returned copies sit in their own sub-folder, so the apps that only know
+     sent drawings (Site Measure's View shop drawing, the ITP apps) carry on
+     showing exactly what they showed before. */
+  function listShopDrawingReturned(groupH){
+    return groupH.getDirectoryHandle("Returned", { create: false }).then(function(rh){
+      return listFilesInDir(rh, function(name){ return /\.pdf$/i.test(name); });
+    }, function(){ return []; }).then(function(files){
+      return files.map(function(f){
+        var p = parseShopDrawingRevisionFileName(f.fileName);
+        return { fileName: f.fileName, handle: f.handle, revLabel: p.revLabel, displayName: p.displayName, stamp: p.stamp, drawingId: groupH.name };
+      });
+    });
+  }
+  function shopStampDate(stamp){
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(stamp || ""));
+    if (!m) return "";
+    try{ return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }); }
+    catch(e){ return m[3] + "/" + m[2] + "/" + m[1]; }
+  }
+  // Every sent revision (newest first) and every returned copy (newest first).
+  function shopDrawingParts(groups){
+    var sent = [], ret = [];
+    (groups || []).forEach(function(g){
+      g.revisions.forEach(function(r){ sent.push(Object.assign({ drawingId: g.drawingId }, r)); });
+      (g.returned || []).forEach(function(r){ ret.push(r); });
+    });
+    function byRev(a, b){ return (revLabelValue(b.revLabel) - revLabelValue(a.revLabel)) || String(b.stamp || "").localeCompare(String(a.stamp || "")); }
+    sent.sort(byRev);
+    ret.sort(function(a, b){ return String(b.stamp || "").localeCompare(String(a.stamp || "")) || byRev(a, b); });
+    return { sent: sent, returned: ret };
+  }
+  /* (v19) Andrew: "we need the option to open all revisions, not just the
+     latest one, have a button that goes to the revisions if there are any
+     then you can chose which one." Each part shows its latest; when there
+     are more, "All revisions (n)" opens the full list (newest first), each
+     with its own Open. */
+  function renderShopDrawingPart(el, list, emptyText, subFor, allWord){
+    el.innerHTML = "";
+    if (!list.length){ el.innerHTML = "<p class=\"sub\" style=\"margin:0;\">" + emptyText + "</p>"; return; }
+    var latest = list[0];
+    el.appendChild(docRow(escapeHtml(latest.displayName), subFor(latest) + (list.length > 1 ? " · latest" : ""), latest.handle));
+    if (list.length < 2) return;
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn secondary sm sd-revs-btn";
+    btn.setAttribute("aria-expanded", "false");
+    btn.textContent = "All " + allWord + " (" + list.length + ")";
+    var box = document.createElement("div");
+    box.className = "sd-revs"; box.hidden = true;
+    list.forEach(function(r){ box.appendChild(docRow(escapeHtml(r.displayName), subFor(r), r.handle)); });
+    btn.addEventListener("click", function(){
+      box.hidden = !box.hidden;
+      btn.setAttribute("aria-expanded", String(!box.hidden));
+      btn.textContent = (box.hidden ? "All " : "Hide ") + allWord + " (" + list.length + ")";
+    });
+    el.appendChild(btn);
+    el.appendChild(box);
+  }
+  function renderShopDrawingParts(groups, sentEl, returnedEl){
+    var parts = shopDrawingParts(groups);
+    renderShopDrawingPart(sentEl, parts.sent, "Nothing sent yet.", function(r){ return r.revLabel + (r.stamp ? " · sent " + shopStampDate(r.stamp) : ""); }, "revisions");
+    renderShopDrawingPart(returnedEl, parts.returned, "Nothing returned yet.", function(r){ return r.revLabel + " returned" + (r.stamp ? " · " + shopStampDate(r.stamp) : ""); }, "returned");
   }
 
   /* ---- Site Measure overlays ---- */
@@ -5421,7 +5548,8 @@
   var joineryItemTitle = document.getElementById("joineryItemTitle");
   var joineryItemMetaGrid = document.getElementById("joineryItemMetaGrid");
   var itemOverlaysList = document.getElementById("itemOverlaysList");
-  var itemShopDrawingsList = document.getElementById("itemShopDrawingsList");
+  var itemShopDrawingsList = document.getElementById("itemShopDrawingsList"); // (v19) the Sent part
+  var itemShopReturnedList = document.getElementById("itemShopReturnedList");
   var itemJobNotesList = document.getElementById("itemJobNotesList");
   var itemItpList = document.getElementById("itemItpList");
   var itemReworkPdfRow = document.getElementById("itemReworkPdfRow");
@@ -5589,6 +5717,7 @@
     var key = joineryItemPageKey(row.level, row.room, row.joineryId);
     itemOverlaysList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Loading…</p>";
     itemShopDrawingsList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Loading…</p>";
+    itemShopReturnedList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Loading…</p>";
     itemJobNotesList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Loading…</p>";
     itemItpList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Loading…</p>";
     itemReworkPdfRow.innerHTML = "";
@@ -5618,18 +5747,11 @@
 
     listShopDrawingsForItem(row.projectHandle, key).then(function(groups){
       if (activeJoineryItemRow !== row) return;
-      itemShopDrawingsList.innerHTML = "";
-      if (!groups.length){
-        itemShopDrawingsList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">No shop drawings yet for this item.</p>";
-        return;
-      }
-      groups.forEach(function(g){
-        var latest = g.revisions[g.revisions.length - 1];
-        itemShopDrawingsList.appendChild(docRow(escapeHtml(latest.displayName), latest.revLabel + " · " + g.revisions.length + (g.revisions.length === 1 ? " revision" : " revisions"), latest.handle));
-      });
+      renderShopDrawingParts(groups, itemShopDrawingsList, itemShopReturnedList); // (v19) Sent / Returned
     }).catch(function(err){
       console.error("Listing shop drawings failed:", err);
       itemShopDrawingsList.innerHTML = "<p class=\"sub\" style=\"margin:0;\">Couldn't load shop drawings.</p>";
+      itemShopReturnedList.innerHTML = "";
     });
 
     listJobNotes(row.projectHandle, key).then(function(notes){
@@ -6079,6 +6201,7 @@
         // own joinery-schedule.json as manufactureStartDate above, just the
         // other field off the same folded record -- see scheduleRowCells.
         requiredDeliveryDate: (mainScheduleRec && mainScheduleRec.requiredDeliveryDate) || "",
+        requiredDeliveryNote: (mainScheduleRec && mainScheduleRec.note) || "", // v19 ("PC Date")
         statusKey: statusKey,
         statusHistory: statusHistory,
         machinedDone: machined.done,
@@ -6224,7 +6347,7 @@
       "<td class=\"id-col st-joineryId\">" + escapeHtml(row.joineryId) + "</td>" +
       "<td class=\"id-col st-workorder frozen-end\">" + (row.workOrderNo ? escapeHtml(row.workOrderNo) : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td>" + (row.manufactureStartDate ? escapeHtml(formatDateDisplay(row.manufactureStartDate)) : "<span class=\"muted-cell\">—</span>") + "</td>" +
-      "<td>" + (row.requiredDeliveryDate ? escapeHtml(formatDateDisplay(row.requiredDeliveryDate)) : "<span class=\"muted-cell\">—</span>") + "</td>" +
+      "<td>" + (row.requiredDeliveryDate ? escapeHtml(formatDateDisplay(row.requiredDeliveryDate)) + (row.requiredDeliveryNote ? "<span class=\"pc-note\">" + escapeHtml(row.requiredDeliveryNote) + "</span>" : "") : "<span class=\"muted-cell\">—</span>") + "</td>" +
       "<td class=\"status-cell\">" + statusLabelHtml(row.statusKey) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "carcase", true) + "</td>" +
       "<td class=\"cut-cell\">" + cutCellHtml(row, "colourBoard", true) + "</td>" +
@@ -6235,6 +6358,46 @@
         "<button type=\"button\" class=\"btn secondary sm open-item-btn\">Open item</button>" +
         (row.jobNote ? "<button type=\"button\" class=\"btn secondary sm job-note-btn\">Open job note</button>" : "") +
         "<button type=\"button\" class=\"btn secondary sm view-plan-btn\">View on plan</button></td>";
+  }
+  /* v19 -- Andrew: "in the schedules, make it so a long press on a row
+     takes you to that joinery item summary page". A long press (0.55 s,
+     finger or mouse) anywhere on a row that isn't a button opens the item,
+     same as Open item; a right-click does too. Moving more than a few
+     pixels (scrolling the table) cancels it; the row tints while held. The
+     tap that ends a long press never reaches the cells, and an Android
+     long-press's own context menu is swallowed. */
+  var ROW_LONG_PRESS_MS = 550;
+  function wireRowLongPress(tr, open){
+    var timer = null, start = null, fired = false;
+    function onControl(t){ return !!(t && t.closest && t.closest("button, a, input, select, textarea, label")); }
+    function cancel(){ if (timer){ clearTimeout(timer); timer = null; } tr.classList.remove("lp-pressing"); }
+    tr.addEventListener("pointerdown", function(e){
+      fired = false;
+      if ((e.button !== undefined && e.button !== 0) || onControl(e.target)) return;
+      start = { x: e.clientX, y: e.clientY };
+      cancel();
+      tr.classList.add("lp-pressing");
+      timer = setTimeout(function(){ timer = null; fired = true; tr.classList.remove("lp-pressing"); open(); }, ROW_LONG_PRESS_MS);
+    });
+    tr.addEventListener("pointermove", function(e){
+      if (timer && start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8)) cancel();
+    });
+    tr.addEventListener("pointerup", cancel);
+    tr.addEventListener("pointercancel", cancel);
+    tr.addEventListener("pointerleave", cancel);
+    tr.addEventListener("contextmenu", function(e){
+      if (onControl(e.target)) return;
+      e.preventDefault();
+      if (fired) return;
+      cancel();
+      fired = true;
+      open();
+    });
+    tr.addEventListener("click", function(e){
+      if (!fired) return;
+      fired = false;
+      e.stopPropagation(); e.preventDefault();
+    }, true);
   }
   function wireRowActions(tr, row, returnScreen){
     var openItemBtn = tr.querySelector(".open-item-btn");
@@ -6253,6 +6416,7 @@
     openItemBtn.addEventListener("click", function(){
       withHandle(function(){ openJoineryItemPage(row, returnScreen); });
     });
+    wireRowLongPress(tr, function(){ withHandle(function(){ openJoineryItemPage(row, returnScreen); }); }); // v19
     // Only rendered at all when row.jobNote is true (see scheduleRowCells
     // above) -- no dead-end "no notes yet" dialog on a row that never had
     // one.

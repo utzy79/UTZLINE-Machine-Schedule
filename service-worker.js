@@ -250,7 +250,9 @@ var ICON_VERSION = "v1";
 // v20 (2026-09-29): RC 1.0 -- the version is shown as RC 1.0, with a small "RC 1.0" tag on the logo.
 // v21 (2026-09-29): RC 1.0 -- a click on a row opens its item page; Cutting file + Notes columns; table titles pinned + zoom; markers 20% smaller; every save retried + checked; reads retried twice; no "still syncing?" guesses.
 // v22 (2026-09-29): RC 1.0 -- the ITP cards read each checklist with its change files.
-var CACHE_NAME = "utzline-machine-schedule-cache-v22";
+// v23 (2026-09-30): RC 1.0 -- the floor plans show cut progress: green tick = all parts cut, blue cross = part cut.
+// v24 (2026-09-30): RC 1.0 -- event layout v2: status / schedule / cut / completion / cutting file / note records are one folder per LEVEL (Project Saves/UTZLINE Events/<branch>/<Level>/); old per-item folders are still read.
+var CACHE_NAME = "utzline-machine-schedule-cache-v24";
 
 var PRECACHE_URLS = [
   "./jspdf.umd.min.js", // v17: PDF library for rework Print/Share (only loaded when someone prints or shares)

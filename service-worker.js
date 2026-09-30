@@ -248,7 +248,9 @@ var ICON_VERSION = "v1";
 // v18 (2026-09-28): rework module: Delivery ITP delivered events (pin, photo, retakes); PDF photos start on page 1.
 // v19 (2026-09-28): "PC Date" beside the required delivery date; long press on a row opens its item page; shop drawings Sent / Returned, REV A, B, C.
 // v20 (2026-09-29): RC 1.0 -- the version is shown as RC 1.0, with a small "RC 1.0" tag on the logo.
-var CACHE_NAME = "utzline-machine-schedule-cache-v20";
+// v21 (2026-09-29): RC 1.0 -- a click on a row opens its item page; Cutting file + Notes columns; table titles pinned + zoom; markers 20% smaller; every save retried + checked; reads retried twice; no "still syncing?" guesses.
+// v22 (2026-09-29): RC 1.0 -- the ITP cards read each checklist with its change files.
+var CACHE_NAME = "utzline-machine-schedule-cache-v22";
 
 var PRECACHE_URLS = [
   "./jspdf.umd.min.js", // v17: PDF library for rework Print/Share (only loaded when someone prints or shares)

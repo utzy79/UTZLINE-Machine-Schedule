@@ -252,7 +252,9 @@ var ICON_VERSION = "v1";
 // v22 (2026-09-29): RC 1.0 -- the ITP cards read each checklist with its change files.
 // v23 (2026-09-30): RC 1.0 -- the floor plans show cut progress: green tick = all parts cut, blue cross = part cut.
 // v24 (2026-09-30): RC 1.0 -- event layout v2: status / schedule / cut / completion / cutting file / note records are one folder per LEVEL (Project Saves/UTZLINE Events/<branch>/<Level>/); old per-item folders are still read.
-var CACHE_NAME = "utzline-machine-schedule-cache-v24";
+// v25 (2026-09-30): RC 1.0 -- sign in on open (tablets / phones), change-folder button, load timer.
+// v26 (2026-09-30): RC 1.0 -- day / night mode, tick-box status filters, hide / rearrange columns, the builder's logo.
+var CACHE_NAME = "utzline-machine-schedule-cache-v26";
 
 var PRECACHE_URLS = [
   "./jspdf.umd.min.js", // v17: PDF library for rework Print/Share (only loaded when someone prints or shares)

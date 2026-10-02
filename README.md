@@ -1,6 +1,24 @@
 # UTZLINE Machine Schedule — installable app
 
-**Current version: v30 (RC 1.0)** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+**Current version: v33 (RC 1.0)** (its own independent version line, separate from every other app in the family — bump this line, and add a dated entry below, every time a new build ships.)
+
+**v33 (2026-10-02) — RC 1.0: builder logo on the top bar, logos folder, reversed Machined.**
+
+- **Builder logo at the far right of the top bar** (Andrew: *"builder logo on the far right of the top bar"*): one logo in the header, just left of the day / night button, shown only while a project is open and the builder has a logo (it is hidden on the project list).
+- **Company and builder logos live in a `logos` folder** at the Projects root (Andrew: *"move the company and builders logos into a logos folder"*). Every app reads `logos/` first and falls back to the old root files, so nothing breaks before the move; UTZLINE Projects writes only into `logos/` and copies the root files across once (copies -- nothing is moved or deleted). `logos` is never listed as a project.
+- **Dark mode controls**: drop-downs, their open lists, text boxes and buttons that no style had touched now get a real dark background and readable text (one shared rule), and the day / night contrast was swept for white-on-pale text. The two dark-mode background variables that pointed at themselves (`--bg`, `--panel2`) are fixed.
+
+**v32 (2026-10-01) — RC 1.0: reversing a cut reverses Machined; builder logo on project rows; sign-in cover goes up first.**
+
+- **Reversing machining reverses its flags** (Andrew: *"if something is flagged as machined, but then the machining gets reversed, the flags need to be reversed also"*). When a cut is tapped back to Pending and that leaves an item that **was** fully cut no longer fully cut, the "Machined" status those cuts earned is reversed too: one new `statusRetract` event (`{ kind:"statusRetract", from:"machined", by, at }`) is added to the item's own `Joinery Status` folder -- nothing is deleted or rewritten, and the history popup shows the reversal ("Machined reversed", with who and when; the cancelled stage is struck through). Only when the item's status is exactly Machined: an item already Manufactured / Delivered / Installed was signed off by other people in other apps and is **left as it is** (a toast says so). An item machined by the old single button (no cut records) is untouched. Re-cutting machines it again as before. The status fold understands the event (`foldJoineryStatusEvents`); apps that don't know it yet ignore it and keep showing Machined until they are updated -- same event shape in every app's own fold when each is updated.
+- Tests: `pdftest-projects/run_machine_schedule_mark_complete.js` (updated: a reversed cut now reverses Machined, a re-cut machines it again); `pdftest-projects/run_signin_cover_first.js` (new: the sign-in cover is up before the app reads anything).
+- **Builder logo on the far right of each project row** on the Home list (project-meta.json "contractor" -> the logo in the Projects root), same as the Scheduler; header logo window stretches to the logo (same 30 px height).
+- **Sign-in cover first** (shared sign-in module): on a tablet / phone an "Opening…" cover goes up the moment the app starts and becomes the "Who's using this?" list when the names arrive, so the app can't be used in the gap before it (Andrew: *"it opens the app, then opens the user selector just after, so someone could maybe make changes before logging in"*). Already-signed-in reloads, a PC, and a project with no names yet are as before; a 15 s safety drops the cover if the names never arrive.
+
+**v31 (2026-10-01) — RC 1.0: the schedules' "Are you still there?" timeout.**
+
+- **"Are you still there?"** (Andrew: *"can we add a timeout on the schedules, that asks are you still there and closes it after inactivity"*). After **15 idle minutes** (no pointer, key, wheel, scroll or touch) a dialog asks *Are you still there?* with a 60-second countdown. **I'm here** carries on; unanswered, the app closes itself back to its start -- a tablet or phone goes back to the sign-in list, a PC reloads to the start screen. Nothing needs saving first (every change is its own file). The length is 15 minutes unless the device sets `utzline:idleMinutes` (0 = never) -- there is no settings screen for it yet. Shared module `shared/idle/idle.js` (inlined between `UTZLINE-IDLE` markers in all three schedule apps).
+- Test: `pdftest-scheduler/run_idle_timeout_and_status_col.js`.
 
 **v30 (2026-10-01) — RC 1.0: code-only file names -- joinery codes, not descriptions, in every file and folder name (path-limit round, fourth build).**
 

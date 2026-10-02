@@ -256,7 +256,7 @@ var ICON_VERSION = "v1";
 // v26 (2026-09-30): RC 1.0 -- day / night mode, tick-box status filters, hide / rearrange columns, the builder's logo.
 // v27 (2026-10-01): RC 1.0 -- Windows' 260-character path limit: shorter record names in the event store (see README)
 // v33 (2026-10-02): RC 1.0 -- builder logo far right of the top bar, logos folder, reversed Machined, dark-mode controls.
-var CACHE_NAME = "utzline-machine-schedule-cache-v33";
+var CACHE_NAME = "utzline-machine-schedule-cache-v34";
 
 var PRECACHE_URLS = [
   "./jspdf.umd.min.js", // v17: PDF library for rework Print/Share (only loaded when someone prints or shares)
